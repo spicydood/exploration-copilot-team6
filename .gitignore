@@ -1,0 +1,20 @@
+# Data and derived outputs must never leave the HPC
+*.sgy
+*.segy
+*.las
+*.xlsx
+*.xls
+*.npy
+*.npz
+*.parquet
+store/
+store_mock/
+store_mock_input/
+dist/
+eval/results/
+data/well_results.csv
+answer_cache.json
+__pycache__/
+*.pyc
+.venv/
+.env

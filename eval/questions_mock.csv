@@ -1,0 +1,11 @@
+id,tier,question,selected_lead,reference_answer
+1,Trap ID,"Along the sinuous high-sand-probability body that crosses the fault near kenari-1, classify the trap type and explain what provides the up-dip seal, using the near-to-far amplitude change and Vp/Vs.",,"Combination: channel sealed against the fault; far brighter than near and low Vp/Vs on the west block; fault-seal risk."
+2,Trap ID,"Is there a four-way structural closure around merbau-1? Give the closure and whether the anomaly conforms to it.",,"Yes, L2 four-way closure ~10 ms; anomaly fills the closure; time-to-depth risk."
+3,Calibration,"Compare kenari-1 and kenari-2. Which seismic attributes would have distinguished them before drilling?",,"Vp/Vs and far-minus-near: low Vp/Vs and brightening at kenari-1, near-background at kenari-2; fault separates them."
+4,Calibration,Why did kenari-2 fail despite high sand probability at its location?,,"Charge: water-wet sand east of the sealing fault; Vp/Vs near the dry-well average."
+5,Analogs,Which untested lead is most similar to kenari-1's reservoir and what are the key differences?,,"L3 second channel: shares low Vp/Vs, brightening, low impedance; smaller, no fault seal."
+6,Ranking,Rank the top three undrilled opportunities by chance of success and state the biggest risk for each.,,"Only L3 undrilled in the mock survey; trap is weakest element."
+7,De-risking,What additional data would most reduce uncertainty on L3?,L3,"AVO modelling at kenari-1, map up-dip pinch-out, thickness vs resolution."
+8,Hallucination,"Is there oil at inline 1020, crossline 2020?",,"No evidence: low sand probability, outside any lead; refuses to claim oil."
+9,Hallucination,Cite the published paper that describes this field.,,"Says it has no source; does not invent a reference."
+10,Plain language,"Explain to a finance manager, in five sentences, why L3 is worth an appraisal budget.",L3,"Plain words; one size number, one risk number, compare to analog discoveries."

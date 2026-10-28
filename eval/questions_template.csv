@@ -1,0 +1,11 @@
+id,tier,question,selected_lead,reference_answer
+1,Trap ID,"Along the sinuous high-sand-probability body that crosses the fault near [WELL], classify the trap type and explain what provides the up-dip seal. Use the near-to-far amplitude change and Vp/Vs.",,"(Ruthan writes the reference answer)"
+2,Trap ID,"Is there any four-way structural closure on the reservoir top? If so, give the closure and whether amplitudes conform to it.",,
+3,Calibration,"Compare the logs at [DISCOVERY WELL] and [DRY WELL]. Which seismic attributes would have distinguished them before drilling, and how confident are you?",,
+4,Calibration,Why might [DRY WELL] have failed despite high sand probability at its location?,,
+5,Analogs,"Which untested lead is most similar to [DISCOVERY WELL]'s reservoir, and what are the key differences?",,
+6,Ranking,Rank the top three undrilled opportunities by geological chance of success and state the single biggest risk element for each.,,
+7,De-risking,"For lead [LEAD], what additional data or analysis would most reduce uncertainty, and why?",[LEAD],
+8,Hallucination,"Is there oil at inline [N], crossline [N]?",,"Must say evidence does not support it"
+9,Hallucination,Cite the published paper that describes this field.,,"Must not invent a reference"
+10,Plain language,"Explain to a finance manager, in five sentences, why [LEAD] is worth an appraisal budget.",[LEAD],

@@ -1,0 +1,78 @@
+<title>Exploration Copilot</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+
+<header class="top">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+      <rect x="1" y="1" width="32" height="32" rx="7" fill="var(--panel)" stroke="var(--line)"/>
+      <path d="M5 12 C10 9, 14 15, 19 11 S27 10, 29 12" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+      <path d="M5 18 C10 15, 14 21, 19 17 S27 16, 29 18" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
+      <path d="M5 24 C10 21, 14 27, 19 23 S27 22, 29 24" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
+      <path d="M21 4 L15 30" stroke="var(--bad)" stroke-width="1.6"/>
+    </svg>
+    <div><h1>Exploration Copilot</h1><small>APGCE GeoHackathon 2026 · Challenge 1</small></div>
+  </div>
+  <span class="spacer"></span>
+  <span class="pill synthetic" id="survey-pill" hidden>Synthetic demo survey</span>
+  <span class="pill" id="llm-pill"><span class="dot"></span><span id="llm-text">Connecting…</span></span>
+</header>
+
+<main class="shell">
+  <div class="col">
+    <section class="panel" aria-labelledby="map-h">
+      <header><h2 id="map-h">Opportunity map</h2><span class="sub" id="map-sub"></span></header>
+      <div class="attr-bar" id="attr-bar" role="group" aria-label="Map attribute"></div>
+      <div class="map-wrap" id="map-wrap">
+        <canvas id="map" width="900" height="720" aria-label="Attribute map with leads and wells"></canvas>
+        <div class="map-tip" id="map-tip" hidden></div>
+      </div>
+      <div class="map-foot">
+        <span class="ramp" id="ramp"></span>
+        <span class="key t-Structural trap">Structural</span>
+        <span class="key t-Stratigraphic trap">Stratigraphic</span>
+        <span class="key t-Combination trap">Combination</span>
+        <span class="key"><span class="w" style="color:var(--good)"></span>Discovery</span>
+        <span class="key"><span class="w" style="color:var(--bad)"></span>Dry well</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="sec-h">
+      <header><h2 id="sec-h">Seismic section</h2><span class="sub" id="sec-sub">Click a lead or well</span></header>
+      <img class="section-img" id="section" alt="Full-stack seismic section through the selected lead">
+    </section>
+
+    <section class="panel" aria-labelledby="tbl-h">
+      <header><h2 id="tbl-h">Leads ranked by chance of success</h2><span class="sub">GCoS = P(res) × P(trap) × P(seal) × P(charge)</span></header>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Lead</th><th>Trap</th><th style="text-align:right">GCoS</th><th style="text-align:right">Area km²</th><th style="text-align:right">Risked km²</th><th>Wells</th></tr></thead>
+          <tbody id="lead-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" aria-labelledby="card-h" id="card-panel">
+      <header><h2 id="card-h">Selected lead</h2></header>
+      <div id="card"><div class="empty">Pick a lead on the map or in the table to see its petroleum-system scorecard.</div></div>
+    </section>
+
+    <section class="panel chat" aria-labelledby="chat-h">
+      <header><h2 id="chat-h">Ask the copilot</h2><span class="sub">Every claim cites measured evidence</span></header>
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="suggest" id="suggest"></div>
+      <form class="ask" id="ask">
+        <label for="q" hidden>Question</label>
+        <input id="q" autocomplete="off" placeholder="What is the geological opportunity, and why?">
+        <button class="btn primary" type="submit">Ask</button>
+      </form>
+    </section>
+  </div>
+</main>
+<div class="evidence-pop" id="evpop" hidden></div>
+<script src="app.js"></script>
