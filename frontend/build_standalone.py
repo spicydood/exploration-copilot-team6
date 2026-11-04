@@ -40,6 +40,8 @@ def main():
     agent = Agent(store, mode="offline")
 
     maps = {k: b64png(store.map_png(k).read_bytes()) for k in store.meta["maps"]}
+    renders_dir = Path(store.root) / "renders"
+    renders = {p.stem: b64png(p.read_bytes()) for p in sorted(renders_dir.glob("*.png"))} if renders_dir.exists() else {}
     inlines = set()
     details = {}
     for d in store.leads:
@@ -66,18 +68,28 @@ def main():
     answers["point"] = record(agent, f"Is there oil at inline {il0 + 20}, crossline {xl0 + 20}?", None)
 
     data = {"meta": meta_view(store), "wells": wells_view(store), "leads": leads_view(store),
-            "details": details, "maps": maps, "sections": sections, "answers": answers,
-            "health": {"ok": True, "llm_mode": "offline", "prototype": True}}
+            "details": details, "maps": maps, "sections": sections, "answers": answers, "renders": renders,
+            "health": {"ok": True, "llm_mode": "offline", "prototype": True, "hide_wells": False}}
 
     fe = ROOT / "frontend"
     html = (fe / "index.html").read_text()
     html = html.replace('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n', "")
-    html = html.replace('<link rel="stylesheet" href="styles.css">',
-                        "<style>\n" + (fe / "styles.css").read_text() + "\n</style>")
+    css = (fe / "styles.css").read_text()
+    for font in ("Figtree", "Fraunces", "JetBrainsMono"):          # self-hosted fonts travel inside the file
+        f = fe / "fonts" / f"{font}.woff2"
+        if f.exists():
+            css = css.replace(f'url("fonts/{font}.woff2")', "url(data:font/woff2;base64," + base64.b64encode(f.read_bytes()).decode() + ")")
+    grain = fe / "grain.png"
+    if grain.exists():
+        css = css.replace('url("grain.png")', "url(" + b64png(grain.read_bytes()) + ")")
+    html = html.replace('<link rel="stylesheet" href="styles.css">', "<style>\n" + css + "\n</style>")
     payload = json.dumps(data, default=float, separators=(",", ":")).replace("</", "<\\/")
+    scripts = [fe / "js" / n for n in ("api.js", "map.js", "section.js", "chat.js", "views.js")] + [fe / "app.js"]
+    for p in scripts[:-1]:
+        html = html.replace(f'<script src="js/{p.name}"></script>\n', "")
     html = html.replace('<script src="app.js"></script>',
                         f"<script>window.__STANDALONE__={payload};</script>\n<script>\n"
-                        + (fe / "app.js").read_text() + "\n</script>")
+                        + "\n".join(p.read_text() for p in scripts if p.exists()) + "\n</script>")
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)

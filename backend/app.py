@@ -39,6 +39,8 @@ _cache: dict = json.loads(CACHE_PATH.read_text()) if CACHE_PATH.exists() else {}
 class ChatIn(BaseModel):
     message: str
     selected_lead: str | None = None
+    audience: str | None = None          # "geoscientist" (default) | "executive": plain-language wording
+    hide_wells: list[str] | None = None  # blind well test; accepted now, honoured by the tools once implemented
 
 
 def _key(msg: str, lead: str | None) -> str:
@@ -49,7 +51,9 @@ def _key(msg: str, lead: str | None) -> str:
 def health():
     return {"ok": True, "mock": config.MOCK, "synthetic": store.meta.get("synthetic"),
             "llm_mode": agent.mode, "llm_reachable": llm.reachable() if agent.mode == "gemma" else None,
-            "cache": CACHE_ON, "cached_answers": len(_cache)}
+            "cache": CACHE_ON, "cached_answers": len(_cache),
+            "hide_wells": False,   # flip to True when Tools honour ChatIn.hide_wells (blind well test)
+            "renders": sorted(p.stem for p in (Path(store.root) / "renders").glob("*.png")) if (Path(store.root) / "renders").exists() else []}
 
 
 @app.get("/api/meta")
@@ -83,6 +87,15 @@ def map_png(name: str):
     return FileResponse(p, media_type="image/png")
 
 
+@app.get("/api/render/{name}.png")
+def render_png(name: str):
+    """Static renders made by the engine (volume, stack_L3, ...): store/renders/<name>.png."""
+    p = Path(store.root) / "renders" / f"{re.sub(r'[^A-Za-z0-9_-]', '', name)}.png"
+    if not p.exists():
+        raise HTTPException(404, f"no render {name}; run python -m engine.render_instrument")
+    return FileResponse(p, media_type="image/png")
+
+
 @app.get("/api/section.png")
 def section(inline: int | None = None, crossline: int | None = None):
     if inline is None and crossline is None:
@@ -92,7 +105,10 @@ def section(inline: int | None = None, crossline: int | None = None):
 
 @app.post("/api/chat")
 def chat(body: ChatIn):
-    key = _key(body.message, body.selected_lead)
+    message = body.message
+    if body.audience == "executive":
+        message += " (Answer for an asset manager: plain words, no jargon, say the odds as 'about 1 in N'.)"
+    key = _key(message, body.selected_lead)
 
     def gen():
         if CACHE_ON and key in _cache:
@@ -102,7 +118,7 @@ def chat(body: ChatIn):
                 yield f"data: {json.dumps(ev)}\n\n"
             return
         events = []
-        for ev in agent.stream(body.message, body.selected_lead):
+        for ev in agent.stream(message, body.selected_lead):
             events.append(ev)
             yield f"data: {json.dumps(ev, default=str)}\n\n"
         if CACHE_ON:

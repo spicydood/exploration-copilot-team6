@@ -1,424 +1,214 @@
-/* Exploration Copilot front end. Plain JS, no build step.
-   Talks to the FastAPI backend (/api/...). When window.__STANDALONE__ is set (the
-   clickable prototype), the same UI reads embedded data and replays recorded answers. */
+/* Exploration Copilot — boot and the contract between modules.
+   Load order: js/api.js (also defines EC.util, EC.bus, EC.S), js/map.js, js/section.js, js/chat.js, js/views.js, app.js.
+
+   Shared namespace window.EC:
+     EC.api      — see js/api.js
+     EC.S        — state (below). Modules read it; only the owners below write their slice.
+     EC.util     — $, esc, fmt, num(), plural(), icon(), css()
+     EC.bus      — tiny pub/sub: EC.bus.on("lead", fn) / EC.bus.emit("lead", payload)
+       events: "meta" (boot data loaded) · "lead" ({id, detail}) · "well" ({name}) · "attr" (key)
+               "fact" (an evidence item arrived in the stream) · "evidence" (item pinned by a tag click, or null = clear) · "audience" ("geoscientist"|"executive")
+               "blind" ({well} | null) · "answer" ({cited, text, lead}) · "view" (name)
+     Module owners:
+       js/map.js      EC.map      { init(), draw(), setAttr(k), highlight(ref), focusPoint(i,j) }
+       js/section.js  EC.bottom   { init(), show(name, payload), setLead(detail), setWell(well), setEvidence(item) }
+       js/chat.js     EC.chat     { init(), ask(q), welcome(), banner(type, title, body), setSuggestions(lead, well) }
+       js/views.js    EC.views    { init(), renderEvidence(detail), setTab(name), openMemo(), blind: {start(well), reveal(), stop()} }
+   Every module must work when its DOM is missing (returns quietly) so the standalone file degrades. */
 (() => {
   "use strict";
-  const SA = window.__STANDALONE__ || null;
-  const $ = (id) => document.getElementById(id);
-  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const EC = (window.EC = window.EC || {});
+  const { $, esc, css, icon, fmt, num, plural } = EC.util;
+  const bus = EC.bus;
 
-  const ATTRS = [
-    ["sand", "Sand probability"], ["vpvs", "Vp/Vs"], ["avo_diff", "Far − Near"],
-    ["pimp", "P-impedance"], ["top_time", "Structure"], ["disc", "Faults"],
-  ];
-  const TRAP_VAR = { Structural: "--struct", Stratigraphic: "--strat", Combination: "--combo", Unclassified: "--uncls" };
-  const CMAPS = {  // CSS gradients approximating the matplotlib colormaps used for the PNGs
-    inferno: "linear-gradient(90deg,#000004,#56106e,#bb3754,#f98e09,#fcffa4)",
-    viridis_r: "linear-gradient(90deg,#fde725,#35b779,#31688e,#440154)",
-    cividis_r: "linear-gradient(90deg,#fee838,#a59c74,#575c6d,#00224e)",
-    RdBu_r: "linear-gradient(90deg,#2166ac,#92c5de,#f7f7f7,#f4a582,#b2182b)",
-    magma: "linear-gradient(90deg,#000004,#51127c,#b73779,#fc8961,#fcfdbf)",
-    Greys: "linear-gradient(90deg,#ffffff,#969696,#000000)",
-    terrain: "linear-gradient(90deg,#333399,#00b2b2,#99e57f,#d2bb85,#ffffff)",
-  };
-
-  const S = { meta: null, wells: [], leads: [], attr: "sand", sel: null, img: null, hover: null,
-              evidence: {}, busy: false, flashLead: null, flashWell: null };
-
-  // ------------------------------------------------------------------ API layer
-  const api = {
-    json: async (path) => {
-      if (SA) {
-        if (path === "/api/meta") return SA.meta;
-        if (path === "/api/wells") return SA.wells;
-        if (path === "/api/leads") return SA.leads;
-        if (path === "/api/health") return SA.health;
-        const m = path.match(/^\/api\/leads\/(\w+)/);
-        if (m) return SA.details[m[1]];
-      }
-      const r = await fetch(path);
-      if (!r.ok) throw new Error(`${path}: ${r.status}`);
-      return r.json();
-    },
-    mapUrl: (name) => (SA ? SA.maps[name] : `/api/map/${name}.png`),
-    sectionUrl: (il) => {
-      if (!SA) return `/api/section.png?inline=${il}`;
-      const keys = Object.keys(SA.sections).map(Number);
-      const k = keys.reduce((a, b) => (Math.abs(b - il) < Math.abs(a - il) ? b : a), keys[0]);
-      return SA.sections[k];
-    },
-    chat: async function* (message, lead) {
-      if (SA) { yield* replay(message, lead); return; }
-      const res = await fetch("/api/chat", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, selected_lead: lead }),
-      });
-      if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
-      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let cut;
-        while ((cut = buf.indexOf("\n\n")) >= 0) {
-          const chunk = buf.slice(0, cut); buf = buf.slice(cut + 2);
-          for (const line of chunk.split("\n")) if (line.startsWith("data: ")) yield JSON.parse(line.slice(6));
-        }
-      }
-    },
-  };
-
-  function saKey(msg, lead) {
-    const m = msg.toLowerCase();
-    const well = SA.wells.find((w) => m.includes(w.name));
-    const lid = (msg.toUpperCase().match(/\bL\d+\b/) || [])[0] || lead;
-    if (/inline|\bil\b/.test(m)) return "point";
-    if (/similar|look.?alike|analog|yet to be|untested/.test(m)) return `${lid || "-"}|similar`;
-    if (well) return `well|${well.name}`;
-    if (/rank|\btop\b|\blist\b|all leads|overview/.test(m)) return "rank";
-    if (lid && /wrong|alternative|risk|devil|uncertain/.test(m)) return `${lid}|risks`;
-    if (lid) return `${lid}|opportunity`;
-    return "-|opportunity";
+  // ------------------------------------------------------------------ theme + audience
+  function setTheme(t) {
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.setAttribute("data-theme", t);
+    void document.body.offsetHeight;
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
+    try { localStorage.setItem("ec-theme", t); } catch {}
+    const b = $("theme-btn");
+    if (b) {
+      b.setAttribute("aria-label", t === "dark" ? "Switch to light theme" : "Switch to dark theme");
+      b.innerHTML = icon(t === "dark" ? "sun" : "moon");
+    }
+    EC.map?.draw();
   }
-  async function* replay(msg, lead) {
-    const key = saKey(msg, lead);
-    let events = SA.answers[key];
-    if (!events) {
-      events = SA.answers["-|opportunity"];
-      yield { type: "status", text: "Prototype: no recorded answer for that exact question, showing the closest one" };
-    }
-    for (const ev of events) {
-      if (ev.type === "token") await new Promise((r) => setTimeout(r, 10));
-      else if (ev.type === "tool") await new Promise((r) => setTimeout(r, 180));
-      yield ev;
-    }
+  function setAudience(a) {
+    EC.S.audience = a;
+    document.documentElement.toggleAttribute("data-audience", a === "executive");
+    if (a === "executive") document.documentElement.setAttribute("data-audience", "executive");
+    try { localStorage.setItem("ec-audience", a); } catch {}
+    for (const b of $("audience")?.children || []) { const on = b.dataset.audience === a; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; }
+    bus.emit("audience", a);
   }
 
   // ------------------------------------------------------------------ boot
   async function boot() {
+    $("theme-btn")?.addEventListener("click", () => setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+    setTheme(document.documentElement.getAttribute("data-theme") || "dark");
+    for (const b of $("audience")?.children || []) {
+      b.tabIndex = b.dataset.audience === EC.S.audience ? 0 : -1;   // radiogroup: one tab stop, arrows move
+      b.addEventListener("click", () => setAudience(b.dataset.audience));
+      b.addEventListener("keydown", (e) => { if (e.key === "ArrowRight" || e.key === "ArrowLeft") { const n = b.dataset.audience === "executive" ? "geoscientist" : "executive"; setAudience(n); $("audience").querySelector(`[data-audience="${n}"]`).focus(); } });
+    }
+    matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", (e) => { let stored = null; try { stored = localStorage.getItem("ec-theme"); } catch {} if (!stored) setTheme(e.matches ? "light" : "dark"); });
+
     try {
-      [S.meta, S.wells, S.leads] = await Promise.all([api.json("/api/meta"), api.json("/api/wells"), api.json("/api/leads")]);
+      [EC.S.meta, EC.S.wells, EC.S.leads] = await Promise.all([EC.api.json("/api/meta"), EC.api.json("/api/wells"), EC.api.json("/api/leads")]);
     } catch (e) {
-      $("card").innerHTML = `<div class="empty">Couldn't load the survey (${esc(e.message)}). Run <code>python -m engine.precompute</code>, then restart the server.</div>`;
+      const w = $("welcome");
+      if (w) w.querySelector(".hero").innerHTML = `<div class="error-inline"><b>Can't load the survey</b><p>${esc(e.message)}. Build the store with <code>MOCK=1 python -m engine.precompute</code>, start the server, then reload this page.</p></div>`;
       return;
     }
-    $("survey-pill").hidden = !S.meta.synthetic;
-    $("map-sub").textContent = `IL ${S.meta.ilines[0]}–${S.meta.ilines[1]} · XL ${S.meta.xlines[0]}–${S.meta.xlines[1]} · window ${S.meta.window_ms[0]}–${S.meta.window_ms[1]} ms`;
-    buildAttrBar(); renderTable(); setAttr("sand"); health(); setSuggestions();
-    const firstUndrilled = S.leads.find((d) => !d.drilled) || S.leads[0];
-    if (firstUndrilled) selectLead(firstUndrilled.id, { quiet: true });
-    welcome();
+    const m = EC.S.meta;
+    if ($("block-chip")) $("block-chip").textContent = m.block_id ? `Block ${m.block_id}${m.synthetic ? " · synthetic" : ""}` : `Block SK3XX · ${m.synthetic ? "synthetic" : "real data"}`;
+    if ($("map-sub")) $("map-sub").textContent = `IL ${m.ilines[0]}–${m.ilines[1]} · XL ${m.xlines[0]}–${m.xlines[1]}`;
+    if ($("map-window")) $("map-window").textContent = `Window ${m.window_ms[0]}–${m.window_ms[1]} ms`;
+
+    EC.map?.init(); EC.bottom?.init(); EC.chat?.init(); EC.views?.init();
+    health(); welcomeScreen(); phoneInit();
+    const params = new URLSearchParams(location.search);
+    const state = params.get("state");
+    if (state) demoState(state);
+    else if (params.get("lead")) enterWorkspace(params.get("lead"));
   }
 
   async function health() {
+    const dot = $("health")?.querySelector(".dot"); const txt = $("health-text");
+    if (!dot || !txt) return;
     try {
-      const h = await api.json("/api/health");
-      const dot = $("llm-pill").querySelector(".dot");
-      if (SA) { dot.className = "dot off"; $("llm-text").textContent = "Prototype · recorded answers"; return; }
+      const h = (EC.S.health = await EC.api.json("/api/health"));
+      if (EC.api.standalone) { dot.className = "dot off"; txt.textContent = "Prototype · recorded answers"; return; }
       if (h.llm_mode === "gemma") {
         dot.className = "dot " + (h.llm_reachable ? "ok" : "bad");
-        $("llm-text").textContent = h.llm_reachable ? "Gemma 4 connected" : "Gemma unreachable · rules fallback";
-      } else { dot.className = "dot off"; $("llm-text").textContent = "Offline reasoner"; }
-    } catch { $("llm-text").textContent = "Server not responding"; }
+        txt.textContent = h.llm_reachable ? "Gemma 4 connected" : "Gemma unreachable · offline reasoner";
+        if (!h.llm_reachable) EC.chat?.banner("warning", "Gemma is unreachable, using the offline reasoner", "Same evidence, template wording. Answers say which reasoner wrote them.");
+      } else { dot.className = "dot off"; txt.textContent = "Offline reasoner"; }
+    } catch { dot.className = "dot bad"; txt.textContent = "Can't reach the server"; }
   }
 
-  // ------------------------------------------------------------------ map
-  function buildAttrBar() {
-    const bar = $("attr-bar");
-    for (const [k, label] of ATTRS) {
-      if (!S.meta.maps[k]) continue;
-      const b = document.createElement("button");
-      b.className = "chip"; b.type = "button"; b.dataset.attr = k; b.textContent = label;
-      b.setAttribute("aria-pressed", "false");
-      b.onclick = () => setAttr(k);
-      bar.append(b);
-    }
+  // ------------------------------------------------------------------ welcome (D1) → workspace
+  function welcomeScreen() {
+    const w = $("welcome"); if (!w) return;
+    const m = EC.S.meta;
+    $("welcome-bg").src = EC.api.mapUrl("sand");
+    const undrilled = EC.S.leads.filter((d) => !d.drilled).length;
+    const disc = m.calibration?.discovery?.n_wells ?? EC.S.wells.filter((x) => x.result === "discovery").length;
+    const cells = [];
+    if (m.n_volumes) cells.push([m.n_volumes, "seismic volumes"]);
+    cells.push([EC.S.wells.length, `wells, ${plural(disc, "discovery", "discoveries")}`]);
+    cells.push([EC.S.leads.length, "leads measured"]);
+    cells.push([undrilled, plural(undrilled, "undrilled opportunity", "undrilled opportunities").replace(/^\d+\s/, ""), "acc"]);
+    $("survey-stats").innerHTML = cells.map(([v, k, c]) => `<div><span class="v ${c || ""}">${esc(v)}</span><span class="k">${esc(k)}</span></div>`).join("");
+    const dry = EC.S.wells.find((x) => x.result === "dry" && EC.S.leads.some((d) => d.wells_inside.includes(x.name)));
+    const prompts = ["What is the geological opportunity, and why?", "Rank the leads", "Find similar traps yet to be tested"];
+    if (dry) prompts.push(`Why did ${dry.name} come up dry?`);
+    $("hero-prompts").innerHTML = prompts.map((q) => `<button type="button" class="btn">${esc(q)}</button>`).join("");
+    for (const b of $("hero-prompts").children) b.addEventListener("click", () => { enterWorkspace(); EC.chat?.ask(b.textContent); });
+    $("ask-hero").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q-hero").value.trim(); if (!q) return; enterWorkspace(); EC.chat?.ask(q); });
   }
-  function setAttr(k) {
-    S.attr = k;
-    for (const b of $("attr-bar").children) b.setAttribute("aria-pressed", String(b.dataset.attr === k));
-    const m = S.meta.maps[k];
-    $("ramp").innerHTML = `${fmt(m.vmin)} <i style="background:${CMAPS[m.cmap] || CMAPS.inferno}"></i> ${fmt(m.vmax)} <span>${esc(m.label)}</span>`;
-    const img = new Image();
-    img.onload = () => { S.img = img; drawMap(); };
-    img.src = api.mapUrl(k);
+  function enterWorkspace(leadId) {
+    const w = $("welcome"), s = $("shell");
+    if (w && !w.hidden) { w.hidden = true; s.hidden = false; s.classList.add("enter"); EC.map?.draw(); }
+    const first = leadId || EC.S.sel || (EC.S.leads.find((d) => !d.drilled) || EC.S.leads[0])?.id;
+    if (first && EC.S.sel !== first) selectLead(first, { quiet: true });
+    if (!EC.chat?.hasMessages()) EC.chat?.welcome();
   }
-  function geom() {
-    const c = $("map"); const [ni, nj] = S.meta.shape;
-    const W = 900, H = Math.round((900 * ni) / nj);
-    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    return { c, ctx: c.getContext("2d"), W, H, sx: W / nj, sy: H / ni };
-  }
-  const P = (g, i, j) => [(j + 0.5) * g.sx, (i + 0.5) * g.sy];
-  function drawMap() {
-    if (!S.meta) return;
-    const g = geom(); const { ctx, W, H } = g;
-    ctx.clearRect(0, 0, W, H);
-    if (S.img) ctx.drawImage(S.img, 0, 0, W, H);
-    for (const d of S.leads) {
-      const col = css(TRAP_VAR[d.trap_type] || "--uncls");
-      const sel = S.sel === d.id, hov = S.hover?.lead === d.id, fl = S.flashLead === d.id;
-      ctx.beginPath();
-      d.polygon.forEach(([i, j], n) => { const [x, y] = P(g, i, j); n ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-      ctx.closePath();
-      ctx.fillStyle = col + (sel || fl ? "40" : hov ? "30" : "14"); ctx.fill();
-      ctx.lineJoin = "round";
-      ctx.lineWidth = sel || fl ? 7 : 5; ctx.strokeStyle = "rgba(6,10,14,.75)"; ctx.stroke();   // dark halo
-      ctx.lineWidth = sel || fl ? 3.5 : 2.5; ctx.strokeStyle = col; ctx.setLineDash(d.drilled ? [] : [8, 5]); ctx.stroke();
-      ctx.setLineDash([]);
-      const [cx, cy] = P(g, d.centroid[0], d.centroid[1]);
-      label(ctx, d.id, cx, cy, col);
-    }
-    for (const w of S.wells) {
-      if (w.i == null) continue;
-      const [x, y] = P(g, w.i, w.j);
-      const col = w.result === "discovery" ? css("--good") : w.result === "dry" ? css("--bad") : css("--uncls");
-      const big = S.flashWell === w.name || S.hover?.well === w.name;
-      ctx.beginPath(); ctx.arc(x, y, big ? 8 : 6, 0, 7);
-      ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff"; ctx.stroke();
-      ctx.font = "600 13px 'Barlow Semi Condensed', 'Arial Narrow', sans-serif";
-      ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.lineWidth = 3;
-      ctx.strokeText(w.name, x + 10, y + 4); ctx.fillText(w.name, x + 10, y + 4);
-    }
-  }
-  function label(ctx, text, x, y, col) {
-    ctx.font = "600 14px 'JetBrains Mono', monospace";
-    const w = ctx.measureText(text).width + 12;
-    ctx.fillStyle = "rgba(8,12,17,.85)"; roundRect(ctx, x - w / 2, y - 11, w, 22, 5); ctx.fill();
-    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.fillText(text, x, y + 5); ctx.textAlign = "start";
-  }
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-  }
-  function hit(ev) {
-    const g = geom(); const r = g.c.getBoundingClientRect();
-    const x = ((ev.clientX - r.left) / r.width) * g.W, y = ((ev.clientY - r.top) / r.height) * g.H;
-    for (const w of S.wells) {
-      if (w.i == null) continue;
-      const [wx, wy] = P(g, w.i, w.j);
-      if (Math.hypot(wx - x, wy - y) < 10) return { well: w.name, x: ev.clientX - r.left, y: ev.clientY - r.top };
-    }
-    const i = y / g.sy - 0.5, j = x / g.sx - 0.5;
-    for (const d of S.leads) if (inPoly(i, j, d.polygon)) return { lead: d.id, x: ev.clientX - r.left, y: ev.clientY - r.top };
-    return null;
-  }
-  function inPoly(i, j, poly) {
-    let inside = false;
-    for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
-      const [ia, ja] = poly[a], [ib, jb] = poly[b];
-      if ((ia > i) !== (ib > i) && j < ((jb - ja) * (i - ia)) / (ib - ia) + ja) inside = !inside;
-    }
-    return inside;
-  }
-  $("map").addEventListener("mousemove", (ev) => {
-    const h = hit(ev); const tip = $("map-tip");
-    if (JSON.stringify(h?.lead || h?.well) !== JSON.stringify(S.hover?.lead || S.hover?.well)) { S.hover = h; drawMap(); }
-    if (!h) { tip.hidden = true; $("map").style.cursor = "default"; return; }
-    $("map").style.cursor = "pointer";
-    if (h.lead) {
-      const d = S.leads.find((x) => x.id === h.lead);
-      tip.innerHTML = `<b>${d.id}</b> · ${esc(d.trap_type)}<br>${esc(d.subtype)}<br>GCoS ${d.gcos} · ${d.area_km2} km² · ${d.drilled ? "drilled" : "undrilled"}`;
-    } else {
-      const w = S.wells.find((x) => x.name === h.well);
-      tip.innerHTML = `<b>${esc(w.name)}</b><br>${esc(w.result_text || w.result)}<br>IL ${w.inline} · XL ${w.crossline}`;
-    }
-    tip.style.left = h.x + "px"; tip.style.top = h.y + "px"; tip.hidden = false;
-  });
-  $("map").addEventListener("mouseleave", () => { $("map-tip").hidden = true; S.hover = null; drawMap(); });
-  $("map").addEventListener("click", (ev) => {
-    const h = hit(ev);
-    if (h?.lead) selectLead(h.lead);
-    else if (h?.well) selectWell(h.well);
-  });
 
-  // ------------------------------------------------------------------ table + card
-  function renderTable() {
-    $("lead-rows").innerHTML = S.leads.map((d) => `
-      <tr data-id="${d.id}" class="${S.sel === d.id ? "sel" : ""}" tabindex="0">
-        <td><b>${d.id}</b></td>
-        <td><span class="trap t-${d.trap_type}">${esc(d.trap_type)}</span></td>
-        <td class="num">${d.gcos.toFixed(3)}<span class="gbar"><i style="width:${Math.min(100, d.gcos * 250)}%"></i></span></td>
-        <td class="num">${d.area_km2}</td>
-        <td class="num">${d.risked_area_km2}</td>
-        <td>${d.wells_inside.length ? d.wells_inside.map((n) => wellTag(n)).join(", ") : '<span style="color:var(--muted)">undrilled</span>'}</td>
-      </tr>`).join("");
-    for (const tr of $("lead-rows").children) {
-      tr.onclick = () => selectLead(tr.dataset.id);
-      tr.onkeydown = (e) => { if (e.key === "Enter") selectLead(tr.dataset.id); };
-    }
-  }
-  const wellTag = (n) => {
-    const w = S.wells.find((x) => x.name === n);
-    return `<span class="res-${w?.result}">${esc(n)}</span>`;
-  };
-
+  // ------------------------------------------------------------------ selection
   async function selectLead(id, opts = {}) {
-    S.sel = id; drawMap(); renderTable();
-    const det = await api.json(`/api/leads/${id}`);
-    renderCard(det);
-    showSection(det.section_inline, `through ${id} crest`);
-    setSuggestions(id);
-    if (!opts.quiet) $("card-panel").classList.remove("flash"), void $("card-panel").offsetWidth, $("card-panel").classList.add("flash");
+    EC.S.sel = id; EC.S.selWell = null;
+    EC.map?.draw();
+    bus.emit("lead", { id, detail: null });
+    try {
+      const det = await EC.api.json(`/api/leads/${id}`);
+      if (EC.S.sel !== id) return;
+      EC.S.detail = det;
+      bus.emit("lead", { id, detail: det });
+      EC.chat?.setSuggestions(id);
+      if (!opts.quiet) { const p = document.querySelector(".panel-evidence"); p?.classList.add("is-updated"); setTimeout(() => p?.classList.remove("is-updated"), 1200); }
+    } catch (e) {
+      bus.emit("lead", { id, detail: null, error: `Couldn't load ${id} (${e.message}). Select it again to retry.` });
+    }
   }
   function selectWell(name) {
-    const w = S.wells.find((x) => x.name === name);
-    S.flashWell = name; drawMap();
-    showSection(w.inline, `through ${name}`);
-    setSuggestions(S.sel, name);
-  }
-  function showSection(il, why) {
-    $("section").src = api.sectionUrl(il);
-    $("sec-sub").textContent = `Inline ${il} · ${why}`;
+    const w = EC.S.wells.find((x) => x.name === name); if (!w) return;
+    EC.S.selWell = name;
+    bus.emit("well", { well: w });
+    EC.chat?.setSuggestions(EC.S.sel, name);
   }
 
-  function renderCard(det) {
-    const d = det.lead, sc = d.scorecard;
-    const weakest = Object.entries(sc).sort((a, b) => a[1] - b[1])[0][0];
-    const rows = ["reservoir", "trap", "seal", "charge"].map((k) => `
-      <span class="lbl ${k === weakest ? "weak" : ""}">${k[0].toUpperCase() + k.slice(1)}</span>
-      <span class="bar ${k === weakest ? "weak" : ""}"><i style="width:${sc[k] * 100}%"></i></span>
-      <span class="n">${sc[k].toFixed(2)}</span>`).join("");
-    const wells = det.wells.length
-      ? det.wells.map((w) => `${wellTag(w.well)} <span style="color:var(--muted)">${esc(w.result_text || "")}</span>`).join("<br>")
-      : "None. This body is untested.";
-    const simLabel = det.similar_pool === "drilled" ? "Closest drilled analog" : "Untested look-alikes";
-    const sim = det.similar.length
-      ? det.similar.map((r) => `<b>${r.id}</b> ${esc(r.trap_type)} · similarity ${r.similarity}`).join("<br>")
-      : "None found";
-    $("card").innerHTML = `
-      <div class="card-body">
-        <div class="lead-head">
-          <div><h3>${d.id} <span class="trap t-${d.trap_type}" style="font-size:15px;vertical-align:3px">${esc(d.trap_type)}</span></h3>
-          <div class="subtype">${esc(d.subtype)}</div></div>
-          <div class="gcos"><div class="v">${d.gcos.toFixed(3)}</div><div class="l">Chance of success</div></div>
-        </div>
-        <div class="score" aria-label="Petroleum-system scorecard">${rows}</div>
-        <dl class="facts">
-          <dt>Area</dt><dd>${d.area_km2} km² · risked ${d.risked_area_km2} km²</dd>
-          <dt>Shape</dt><dd>elongation ${d.shape.elongation} · sinuosity ${d.shape.sinuosity}</dd>
-          <dt>Structure</dt><dd>closure ${d.structure.closure_ms ?? "–"} ms · fault contact ${Math.round(d.fault_contact_frac * 100)}%</dd>
-          <dt>Wells</dt><dd>${wells}</dd>
-          <dt>${simLabel}</dt><dd>${sim}</dd>
-        </dl>
-        <details class="alts"><summary>What could make this wrong (${det.alternatives.length})</summary>
-          <ul>${det.alternatives.map((a) => `<li><b>${esc(a.risk)}:</b> ${esc(a.alternative)} <i>De-risk: ${esc(a.de_risk)}</i></li>`).join("")}</ul>
-        </details>
-        <div class="actions">
-          <button class="btn primary" data-q="What is the geological opportunity here, and why?">Explain this lead</button>
-          <button class="btn" data-q="What could make ${d.id} wrong?">Devil's advocate</button>
-          <button class="btn" data-q="Find similar traps yet to be tested like ${d.id}">Find look-alikes</button>
-        </div>
-      </div>`;
-    for (const b of $("card").querySelectorAll("[data-q]")) b.onclick = () => ask(b.dataset.q);
+  // ------------------------------------------------------------------ demo states (?state=...) for screenshots and the judges' walkthrough
+  function demoState(name) {
+    enterWorkspace();
+    const map = {
+      offline: () => EC.chat?.banner("warning", "Gemma is busy, using the offline reasoner", "Same evidence, template wording. Retrying in the background."),
+      unreachable: () => { $("health").querySelector(".dot").className = "dot bad"; $("health-text").textContent = "Can't reach the server"; EC.chat?.banner("error", "Can't reach the server", "Check it is running, then reload this page."), $("send")?.setAttribute("aria-disabled", "true"); },
+      refusal: () => EC.chat?.ask(`Is there oil at inline ${EC.S.meta.ilines[0] + 100}, crossline ${EC.S.meta.xlines[0] + 30}?`),
+      empty: () => { EC.S.sel = null; EC.S.detail = null; EC.map?.draw(); bus.emit("lead", { id: null, detail: null }); },
+      executive: () => setAudience("executive"),
+      blind: () => EC.views?.blind.start(EC.S.wells.find((x) => x.result === "discovery")?.name),
+      memo: () => EC.views?.openMemo(),
+      imagefail: () => bus.emit("imagefail", true),
+    };
+    (map[name] || (() => {}))();
   }
 
-  // ------------------------------------------------------------------ chat
-  function setSuggestions(lead, well) {
-    const dry = S.wells.find((w) => w.result === "dry" && S.leads.some((d) => d.wells_inside.includes(w.name)));
-    const qs = [];
-    if (well) qs.push(`Why did ${well} ${S.wells.find((w) => w.name === well)?.result === "dry" ? "fail" : "succeed"}?`);
-    qs.push(lead ? "What is the geological opportunity here, and why?" : "What is the geological opportunity, and why?");
-    if (lead) qs.push(`What could make ${lead} wrong?`);
-    qs.push("Find similar traps yet to be tested");
-    if (!well && dry) qs.push(`Why did ${dry.name} fail?`);
-    qs.push("Rank the top leads");
-    $("suggest").innerHTML = qs.slice(0, 4).map((q) => `<button type="button">${esc(q)}</button>`).join("");
-    for (const b of $("suggest").children) b.onclick = () => ask(b.textContent);
+  // ------------------------------------------------------------------ phone shell (≤ 600 px): tab bar, title block, sheet
+  const phoneMq = matchMedia("(max-width: 600px)");
+  const isPhone = () => phoneMq.matches;
+  function phoneTitle() {
+    const h = $("ptitle-h"), c = $("ptitle-c"); if (!h || !c) return;
+    const m = EC.S.meta || {}, tab = document.documentElement.dataset.ptab || "map";
+    const block = m.block_id ? `Block ${m.block_id}` : "Block SK3XX";
+    const model = $("health-text")?.textContent || "";
+    const attrLabel = $("attr-bar")?.querySelector('[aria-selected="true"]')?.textContent || "";
+    const disc = m.calibration?.discovery?.n_wells ?? EC.S.wells.filter((x) => x.result === "discovery").length;
+    const t = {
+      map: [block, document.documentElement.dataset.pmap === "section" ? `Seismic section · ${EC.S.sel || ""}` : `Opportunity map · ${attrLabel.toLowerCase()}`],
+      chat: ["Copilot", `${block} · ${model}`],
+      leads: [EC.S.audience === "executive" ? "Leads by value" : "Leads", EC.S.sel ? `${EC.S.sel} selected · ${plural(EC.S.leads.length, "lead", "leads")}` : plural(EC.S.leads.length, "lead", "leads")],
+      wells: [EC.S.blind ? "Blind test" : "Wells", EC.S.blind ? `${EC.S.blind.well} hidden from all evidence` : `${plural(EC.S.wells.length, "well", "wells")} · ${plural(disc, "discovery", "discoveries")}`],
+    }[tab];
+    h.textContent = t[0]; c.textContent = t[1];
   }
-  function welcome() {
-    const m = document.createElement("div"); m.className = "msg bot";
-    m.innerHTML = `<div class="md"><p>I read the stacks, inversion volumes and wells for this survey and mapped <b>${S.leads.length} leads</b> around <b>${S.wells.length} wells</b>. Ask what the opportunity is, why a well failed, or which untested traps look like a discovery. Tags like <span class="ev">E3</span> open the measurement behind each claim.</p></div>`;
-    $("log").append(m);
+  function setPhoneTab(name) {
+    const root = document.documentElement;
+    root.dataset.ptab = name;
+    for (const b of $("tabbar")?.children || []) { const on = b.dataset.ptab === name; if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); }
+    if (name === "wells") EC.bottom?.show?.(EC.S.blind ? "blind" : "wells");
+    else if (name === "map" && root.dataset.pmap === "section") EC.bottom?.show?.("section");
+    phoneTitle();
+    EC.map?.draw();
+    const main = $("main"); if (main) main.scrollTop = 0; window.scrollTo(0, 0);
   }
-  $("ask").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) { $("q").value = ""; ask(q); } });
+  function phoneLayout() {
+    const on = isPhone(), root = document.documentElement;
+    $("tabbar").hidden = !on; $("ptitle").hidden = !on; $("sheet-actions").hidden = !on; $("pactions").hidden = !on;
+    const pa = $("pactions"), actions = document.querySelector(".top .actions");
+    if (on) { if (!root.dataset.ptab) root.dataset.ptab = "map"; pa.append($("blind-btn"), $("memo-btn")); }
+    else { actions.append($("blind-btn"), $("memo-btn")); delete root.dataset.ptab; delete root.dataset.pmap; }
+    EC.bottom?.show?.(EC.bottom.current?.());   // re-evaluates which views apply (the wells view is phone-only)
+    phoneTitle(); EC.map?.draw();
+  }
+  function phoneInit() {
+    for (const b of $("tabbar")?.children || []) b.addEventListener("click", () => setPhoneTab(b.dataset.ptab));
+    $("sheet-ask")?.addEventListener("click", () => { setPhoneTab("chat"); EC.chat?.ask(EC.S.sel ? `What is the geological opportunity in ${EC.S.sel}, and why?` : "What is the geological opportunity, and why?"); });
+    $("sheet-section")?.addEventListener("click", () => {
+      const root = document.documentElement, on = root.dataset.pmap !== "section";
+      if (on) root.dataset.pmap = "section"; else delete root.dataset.pmap;
+      $("sheet-section").setAttribute("aria-pressed", String(on));
+      $("sheet-section").lastChild.textContent = on ? "Map" : "Section";
+      if (on) EC.bottom?.show?.("section"); phoneTitle(); EC.map?.draw();
+    });
+    bus.on("lead", phoneTitle); bus.on("attr", phoneTitle); bus.on("audience", phoneTitle); bus.on("blind", (p) => { phoneTitle(); if (isPhone() && p) setPhoneTab("wells"); });
+    phoneMq.addEventListener?.("change", phoneLayout);
+    phoneLayout();
+  }
 
-  async function ask(q) {
-    if (S.busy) return;
-    S.busy = true;
-    const log = $("log");
-    const u = document.createElement("div"); u.className = "msg user"; u.textContent = q; log.append(u);
-    const b = document.createElement("div"); b.className = "msg bot";
-    b.innerHTML = `<div class="trail"></div><div class="md"><p style="color:var(--muted)">Thinking…</p></div><div class="meta-line"></div>`;
-    log.append(b); log.scrollTop = log.scrollHeight;
-    const trail = b.querySelector(".trail"), md = b.querySelector(".md"), meta = b.querySelector(".meta-line");
-    let text = "", pending = false;
-    const paint = () => { pending = false; md.innerHTML = renderMd(text); log.scrollTop = log.scrollHeight; };
-    try {
-      for await (const ev of api.chat(q, S.sel)) {
-        if (ev.type === "status") { if (!text) md.innerHTML = `<p style="color:var(--muted)">${esc(ev.text)}…</p>`; }
-        else if (ev.type === "tool") {
-          const s = document.createElement("span");
-          s.textContent = `${ev.name}(${Object.values(ev.args || {}).join(", ")})` + (ev.evidence_ids?.length ? ` → ${ev.evidence_ids.length} facts` : "");
-          s.title = ev.why || ""; trail.append(s);
-        } else if (ev.type === "evidence") { for (const it of ev.items) S.evidence[it.id] = it; }
-        else if (ev.type === "token") { text += ev.text; if (!pending) { pending = true; requestAnimationFrame(paint); } }
-        else if (ev.type === "done") {
-          paint();
-          const bad = ev.unverified_numbers?.length;
-          meta.innerHTML = `${ev.cited.length} facts cited · <span class="${bad ? "warn" : ""}">${bad ? bad + " number(s) not found in evidence: " + esc(ev.unverified_numbers.join(", ")) : "every number traced to evidence"}</span> · ${ev.mode === "gemma" ? "Gemma 4" : "offline reasoner"} · ${ev.seconds}s${ev.note ? " · " + esc(ev.note) : ""}`;
-        }
-      }
-    } catch (e) {
-      md.innerHTML = `<p>Couldn't get an answer: ${esc(e.message)}. Check the server is running, then try again.</p>`;
-    }
-    S.busy = false;
-  }
-
-  // ------------------------------------------------------------------ evidence chips
-  document.addEventListener("click", (e) => {
-    const chip = e.target.closest(".ev[data-id]");
-    const pop = $("evpop");
-    if (!chip) { if (!e.target.closest("#evpop")) pop.hidden = true; return; }
-    const it = S.evidence[chip.dataset.id];
-    if (!it) return;
-    const val = `${it.value}${it.unit ? " " + it.unit : ""}${it.compare != null ? ` <span style="color:var(--muted)">vs ${it.compare}</span>` : ""}`;
-    pop.innerHTML = `<div class="id">${it.id}</div><div>${esc(it.label)}</div><div class="val">${val}</div>${it.note ? `<div style="color:var(--muted)">${esc(it.note)}</div>` : ""}`;
-    const r = chip.getBoundingClientRect();
-    pop.style.left = Math.min(r.left, innerWidth - 336) + "px"; pop.style.top = r.bottom + 6 + "px"; pop.hidden = false;
-    const ref = it.ref || {};
-    if (ref.map && ref.map !== S.attr && S.meta.maps[ref.map]) setAttr(ref.map);
-    if (ref.lead) { S.flashLead = ref.lead; if (ref.lead !== S.sel) selectLead(ref.lead, { quiet: true }); }
-    if (ref.well) { S.flashWell = ref.well; }
-    drawMap();
-    setTimeout(() => { S.flashLead = null; S.flashWell = null; drawMap(); }, 1600);
-  });
-
-  // ------------------------------------------------------------------ tiny markdown
-  function inline(s) {
-    return esc(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\[(E\d+)\]/g, '<button type="button" class="ev" data-id="$1">$1</button>');
-  }
-  function renderMd(src) {
-    const lines = src.split("\n"); let out = "", i = 0;
-    while (i < lines.length) {
-      const l = lines[i];
-      if (/^\s*\|/.test(l)) {
-        const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
-        const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-        const body = rows.filter((r, k) => !(k === 1 && /^[\s|:-]+$/.test(r)));
-        out += `<div class="tw"><table><thead><tr>${cells(body[0]).map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>` +
-          body.slice(1).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
-      } else if (/^\s*[-*] /.test(l) || /^\s*\d+\. /.test(l)) {
-        const ordered = /^\s*\d+\. /.test(l); const items = [];
-        while (i < lines.length && (/^\s*[-*] /.test(lines[i]) || /^\s*\d+\. /.test(lines[i]))) items.push(lines[i++].replace(/^\s*([-*]|\d+\.) /, ""));
-        out += `<${ordered ? "ol" : "ul"}>${items.map((t) => `<li>${inline(t)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`;
-      } else if (l.trim() === "") { i++; }
-      else {
-        const para = []; while (i < lines.length && lines[i].trim() !== "" && !/^\s*(\||[-*] |\d+\. )/.test(lines[i])) para.push(lines[i++].replace(/^#+\s*/, ""));
-        out += `<p>${inline(para.join(" "))}</p>`;
-      }
-    }
-    return out;
-  }
-  function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
-  function fmt(v) { const a = Math.abs(v); return a >= 1000 ? Math.round(v).toString() : a >= 10 ? v.toFixed(1) : v.toFixed(2); }
-
-  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawMap);
-  new MutationObserver(drawMap).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  boot();
+  EC.app = { selectLead, selectWell, enterWorkspace, setAudience, setTheme, setPhoneTab, isPhone };
+  document.addEventListener("DOMContentLoaded", boot);
 })();

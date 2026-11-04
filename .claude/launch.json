@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "copilot-mock",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "MOCK=1 .venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8800 --reload --reload-dir frontend --reload-dir backend"
+      ],
+      "port": 8800
+    },
+    {
+      "name": "standalone-demo",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8811",
+        "--directory",
+        "dist"
+      ],
+      "port": 8811
+    }
+  ]
+}

@@ -53,6 +53,40 @@ Well results: if `WellList_Information.xlsx` has no result column, copy
 3. Open the app: wells sit where DUG Insight shows them, and discoveries land on sand.
 4. `meta.json -> calibration`: discovery wells should differ from dry wells on Vp/Vs and sand.
 
+## Front end
+
+`frontend/` is plain HTML, CSS and JS with no build step, so it runs from the FastAPI static mount on the
+HPC and inlines into the standalone demo file. Layout and every value come from the Figma "Screens" page
+(`docs/design/figma-screens-spec.md`, PNGs beside it); the deviations from Figma that the anti-slop rules
+required are listed there in section 8.8 of the plan.
+
+```
+frontend/index.html   doctype, landmarks, skip link, header (audience + theme), the shell, two <dialog>s
+frontend/styles.css   one file, cascade layers: tokens (light + dark, Audience modes) → base → layout → components → states → print
+frontend/app.js       boot, selection, demo states;  js/api.js also holds EC.util / EC.bus / EC.S (loads first)
+frontend/js/map.js    canvas overlay (grid, outlines, ring, wells, pin, readout) + DOM labels + keyboard twin
+frontend/js/section.js bottom panel: Section / Volume / Stack / Compare views and the view registry
+frontend/js/chat.js   SSE streaming, run-in headings, evidence tags, evidence dialog, banners
+frontend/js/views.js  scorecard / devil's advocate / similar traps, Executive mode + business case, blind well test, memo
+frontend/fonts/       Figtree, Fraunces, JetBrains Mono (OFL), subset WOFF2 from scripts/fetch_fonts.py
+frontend/icons.svg    Lucide subset (ISC), inlined into index.html
+```
+
+Rules the code follows: every number with a unit is set in JetBrains Mono (`.num`); colours come only from the
+semantic tokens in `styles.css`; strokes ≥ 1 px at ≥ 40 % and text ≥ 12 px so the RustDesk stream keeps them;
+no `backdrop-filter`, no looping motion; Firefox ESR safe (no Popover API, no `@starting-style`, no `:has()`).
+
+```bash
+.venv/bin/python scripts/fetch_fonts.py           # once: download + subset the fonts
+MOCK=1 python -m engine.render_instrument         # volume + risk-stack renders for the bottom panel
+.venv/bin/python scripts/check_ui.py              # contrast matrix, colour-literal / grid / slop / CDN gates
+```
+
+Demo states for screenshots and the walkthrough: `?lead=L3`, `?state=offline`, `?state=unreachable`,
+`?state=refusal`, `?state=empty`, `?state=executive`, `?state=blind`, `?state=memo`, `?state=imagefail`.
+The Executive mode's dollar figures come only from the two assumption inputs (dry-hole cost, value if it
+works); nothing is shown until the asset team enters them.
+
 ## LLM settings
 
 | Variable | Default | Meaning |

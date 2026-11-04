@@ -1,78 +1,169 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
 <title>Exploration Copilot</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<meta name="color-scheme" content="dark light">
 <link rel="stylesheet" href="styles.css">
+<script>
+  // Theme before first paint: stored choice, else the OS preference. One mechanism: data-theme.
+  (function () {
+    var t = null; try { t = localStorage.getItem("ec-theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+    var a = null; try { a = localStorage.getItem("ec-audience"); } catch (e) {}
+    if (a === "executive") document.documentElement.setAttribute("data-audience", "executive");
+  })();
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<!-- Icons: Lucide (ISC). ISC License  Copyright (c) 2026 Lucide Icons and Contributors Full text in frontend/fonts/OFL.txt companion LICENSE-lucide.txt. -->
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" /> <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" /> <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" /></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /> <path d="m3.3 7 8.7 5 8.7-5" /> <path d="M12 22V12" /></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01" /> <path d="M3 12h.01" /> <path d="M3 19h.01" /> <path d="M8 5h13" /> <path d="M8 12h13" /> <path d="M8 19h13" /></symbol>
+  <symbol id="i-message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z" /></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /> <circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /> <path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /> <path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /> <path d="m2 2 20 20" /></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" /></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /> <path d="M12 2v2" /> <path d="M12 20v2" /> <path d="m4.93 4.93 1.41 1.41" /> <path d="m17.66 17.66 1.41 1.41" /> <path d="M2 12h2" /> <path d="M20 12h2" /> <path d="m6.34 17.66-1.41 1.41" /> <path d="m19.07 4.93-1.41 1.41" /></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /> <path d="M12 19V5" /></symbol>
+  <symbol id="i-corner-down-right" viewBox="0 0 24 24"><path d="m15 10 5 5-5 5" /> <path d="M4 4v7a4 4 0 0 0 4 4h12" /></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><svg class="lucide lucide-triangle-alert" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /></symbol>
+  <symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /> <path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6" /> <rect x="6" y="14" width="12" height="8" rx="1" /></symbol>
+  <symbol id="i-sliders-horizontal" viewBox="0 0 24 24"><path d="M10 5H3" /> <path d="M12 19H3" /> <path d="M14 3v4" /> <path d="M16 17v4" /> <path d="M21 12h-9" /> <path d="M21 19h-5" /> <path d="M21 5h-7" /> <path d="M8 10v4" /> <path d="M8 12H3" /></symbol>
+  <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0" /> <circle cx="12" cy="10" r="3" /></symbol>
+  <symbol id="i-circle-help" viewBox="0 0 24 24"><svg class="lucide lucide-circle-help" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /> <path d="M12 17h.01" /></symbol>
+</svg>
 
 <header class="top">
   <div class="brand">
-    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
-      <rect x="1" y="1" width="32" height="32" rx="7" fill="var(--panel)" stroke="var(--line)"/>
-      <path d="M5 12 C10 9, 14 15, 19 11 S27 10, 29 12" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-      <path d="M5 18 C10 15, 14 21, 19 17 S27 16, 29 18" fill="none" stroke="var(--accent)" stroke-width="2.4"/>
-      <path d="M5 24 C10 21, 14 27, 19 23 S27 22, 29 24" fill="none" stroke="var(--muted)" stroke-width="1.6"/>
-      <path d="M21 4 L15 30" stroke="var(--bad)" stroke-width="1.6"/>
-    </svg>
-    <div><h1>Exploration Copilot</h1><small>APGCE GeoHackathon 2026 · Challenge 1</small></div>
+    <div class="ptitle" id="ptitle" hidden><p class="pt-h" id="ptitle-h"></p><p class="pt-c caption" id="ptitle-c"></p></div>
+    <a class="wordmark" href="./" aria-label="Exploration Copilot, home">
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 8c3-2 5 2 8 0s5-2 10 0"/><path d="M3 13c3-2 5 2 8 0s5-2 10 0" stroke-width="2.5"/><path d="M3 18c3-2 5 2 8 0s5-2 10 0"/></svg>
+      <span>Exploration Copilot</span>
+    </a>
+    <span class="meta-chip num" id="block-chip">Block SK3XX · synthetic</span>
+    <span class="meta-chip" id="health"><span class="dot" aria-hidden="true"></span><span id="health-text">Connecting to the model</span></span>
   </div>
-  <span class="spacer"></span>
-  <span class="pill synthetic" id="survey-pill" hidden>Synthetic demo survey</span>
-  <span class="pill" id="llm-pill"><span class="dot"></span><span id="llm-text">Connecting…</span></span>
+  <div class="seg" role="radiogroup" aria-label="Audience" id="audience">
+    <button type="button" role="radio" aria-checked="true" data-audience="geoscientist"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Geoscientist</button>
+    <button type="button" role="radio" aria-checked="false" data-audience="executive"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Executive</button>
+  </div>
+  <div class="actions">
+    <button type="button" class="btn btn-quiet btn-round" id="theme-btn" aria-label="Switch to light theme" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg></button>
+    <button type="button" class="btn" id="blind-btn" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>Blind well test</button>
+    <button type="button" class="btn btn-primary" id="memo-btn"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg>Committee memo</button>
+  </div>
 </header>
 
-<main class="shell">
-  <div class="col">
-    <section class="panel" aria-labelledby="map-h">
-      <header><h2 id="map-h">Opportunity map</h2><span class="sub" id="map-sub"></span></header>
-      <div class="attr-bar" id="attr-bar" role="group" aria-label="Map attribute"></div>
-      <div class="map-wrap" id="map-wrap">
-        <canvas id="map" width="900" height="720" aria-label="Attribute map with leads and wells"></canvas>
-        <div class="map-tip" id="map-tip" hidden></div>
+<main id="main">
+  <!-- D1: first screen, shown until the first question or lead selection -->
+  <section class="welcome enter" id="welcome" aria-labelledby="welcome-h">
+    <img class="welcome-bg" id="welcome-bg" alt="" aria-hidden="true">
+    <div class="welcome-vig" aria-hidden="true"></div>
+    <div class="hero">
+      <svg class="icon" aria-hidden="true" viewBox="0 0 24 24" style="font-size:48px;color:var(--ochre-400)"><path d="M3 8c3-2 5 2 8 0s5-2 10 0"/><path d="M3 13c3-2 5 2 8 0s5-2 10 0" stroke-width="2.5"/><path d="M3 18c3-2 5 2 8 0s5-2 10 0"/></svg>
+      <div>
+        <h1 id="welcome-h">What is the opportunity in this block?</h1>
+        <p class="lede">I have measured every sand body in the seismic and checked it against the wells. Ask about a lead, a well or the whole survey; every answer shows its evidence.</p>
       </div>
-      <div class="map-foot">
-        <span class="ramp" id="ramp"></span>
-        <span class="key t-Structural trap">Structural</span>
-        <span class="key t-Stratigraphic trap">Stratigraphic</span>
-        <span class="key t-Combination trap">Combination</span>
-        <span class="key"><span class="w" style="color:var(--good)"></span>Discovery</span>
-        <span class="key"><span class="w" style="color:var(--bad)"></span>Dry well</span>
-      </div>
-    </section>
-
-    <section class="panel" aria-labelledby="sec-h">
-      <header><h2 id="sec-h">Seismic section</h2><span class="sub" id="sec-sub">Click a lead or well</span></header>
-      <img class="section-img" id="section" alt="Full-stack seismic section through the selected lead">
-    </section>
-
-    <section class="panel" aria-labelledby="tbl-h">
-      <header><h2 id="tbl-h">Leads ranked by chance of success</h2><span class="sub">GCoS = P(res) × P(trap) × P(seal) × P(charge)</span></header>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Lead</th><th>Trap</th><th style="text-align:right">GCoS</th><th style="text-align:right">Area km²</th><th style="text-align:right">Risked km²</th><th>Wells</th></tr></thead>
-          <tbody id="lead-rows"></tbody>
-        </table>
-      </div>
-    </section>
-  </div>
-
-  <div class="col">
-    <section class="panel" aria-labelledby="card-h" id="card-panel">
-      <header><h2 id="card-h">Selected lead</h2></header>
-      <div id="card"><div class="empty">Pick a lead on the map or in the table to see its petroleum-system scorecard.</div></div>
-    </section>
-
-    <section class="panel chat" aria-labelledby="chat-h">
-      <header><h2 id="chat-h">Ask the copilot</h2><span class="sub">Every claim cites measured evidence</span></header>
-      <div class="log" id="log" aria-live="polite"></div>
-      <div class="suggest" id="suggest"></div>
-      <form class="ask" id="ask">
-        <label for="q" hidden>Question</label>
-        <input id="q" autocomplete="off" placeholder="What is the geological opportunity, and why?">
-        <button class="btn primary" type="submit">Ask</button>
+      <form class="composer" id="ask-hero">
+        <div class="field"><label for="q-hero">Question</label><input class="input" id="q-hero" name="q" autocomplete="off" placeholder="What is the geological opportunity, and why?"></div>
+        <button type="submit" class="btn btn-round" aria-label="Ask"><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
       </form>
+      <div class="prompts" id="hero-prompts"></div>
+    </div>
+    <div class="survey-stats" id="survey-stats"></div>
+  </section>
+
+  <div class="shell" id="shell" hidden>
+    <section class="panel panel-well panel-map" aria-labelledby="map-h">
+      <div class="panel-head"><h2 id="map-h">Opportunity map</h2><span class="sub num-sm" id="map-sub"></span></div>
+      <div class="map-stage" id="map-stage">
+        <img class="map-img" id="map-img" alt="" aria-hidden="true">
+        <canvas id="map" role="img" aria-labelledby="map-h" aria-describedby="map-desc" tabindex="0"></canvas>
+        <div class="map-shade" aria-hidden="true"></div>
+        <div class="map-tabs" role="tablist" aria-label="Map attribute" id="attr-bar"></div>
+        <div class="map-ui window num-sm" id="map-window"></div>
+        <div id="map-labels"></div>
+        <div class="map-ui readout" id="readout" hidden></div>
+        <div class="locator" id="locator" hidden></div>
+        <div class="map-ui legend" id="legend"></div>
+        <div class="map-ui scale" id="scale"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v18M7 8l5-5 5 5"/></svg><span class="bar-m" aria-hidden="true"></span><span class="num-sm" id="scale-text"></span></div>
+        <div class="map-tip num-sm" id="map-tip" hidden></div>
+      </div>
+      <p class="vh" id="map-desc"></p>
+      <div class="map-contents vh" id="map-contents" aria-label="Map contents"></div>
+    </section>
+
+    <section class="panel panel-well panel-bottom" aria-labelledby="bottom-h">
+      <div class="panel-head"><h2 id="bottom-h">Seismic section</h2><span class="sub num-sm" id="bottom-sub">no lead selected</span></div>
+      <div class="seg seg-neutral view-toggle" role="tablist" aria-label="Bottom panel view" id="view-toggle"></div>
+      <div class="view" id="bottom-view"></div>
+    </section>
+
+    <section class="panel panel-copilot" aria-labelledby="chat-h">
+      <div class="panel-head"><h2 id="chat-h">Copilot</h2><span class="sub">Answers cite the measurements they use</span></div>
+      <div class="panel-body">
+        <div id="banners"></div>
+        <div class="log" id="log"></div>
+        <p class="vh" id="chat-status" role="status" aria-live="polite"></p>
+        <div class="suggest" id="suggest"></div>
+        <form class="composer" id="ask">
+          <div class="field"><label for="q">Question</label><input class="input" id="q" name="q" autocomplete="off" placeholder="What could make L3 wrong?"></div>
+          <button type="submit" class="btn btn-primary btn-round" id="send" aria-label="Ask"><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel panel-evidence" aria-labelledby="ev-h">
+      <div class="panel-head"><h2 id="ev-h" class="vh">Evidence</h2></div>
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="panel-body">
+        <div class="tabs" role="tablist" aria-label="Evidence view" id="ev-tabs"></div>
+        <div id="ev-body"></div>
+        <div class="sheet-actions" id="sheet-actions" hidden>
+          <button type="button" class="btn btn-primary" id="sheet-ask"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg>Ask about this lead</button>
+          <button type="button" class="btn" id="sheet-section" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Section</button>
+        </div>
+        <div class="pactions" id="pactions" hidden></div>
+      </div>
     </section>
   </div>
 </main>
-<div class="evidence-pop" id="evpop" hidden></div>
+
+<nav class="tabbar" id="tabbar" aria-label="Sections" hidden>
+  <button type="button" data-ptab="map" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-map"/></svg><span>Map</span></button>
+  <button type="button" data-ptab="chat"><svg class="icon" aria-hidden="true"><use href="#i-message-square"/></svg><span>Chat</span></button>
+  <button type="button" data-ptab="leads"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><span>Leads</span></button>
+  <button type="button" data-ptab="wells"><svg class="icon" aria-hidden="true"><use href="#i-database"/></svg><span>Wells</span></button>
+</nav>
+
+<dialog class="pop" id="evpop" aria-labelledby="evpop-h">
+  <div class="pop-head"><span class="ev" aria-hidden="true"><b id="evpop-id">E0</b></span><span class="caption" id="evpop-src"></span><button type="button" class="btn btn-quiet btn-round" data-close aria-label="Close evidence"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <h3 id="evpop-h" class="label" style="font-family:var(--f-ui)"></h3>
+  <div class="val num" id="evpop-val"></div>
+  <div class="cmp" id="evpop-cmp"></div>
+  <p class="caption" id="evpop-note"></p>
+</dialog>
+
+<dialog class="memo" id="memo" aria-labelledby="memo-h"></dialog>
+
+<script src="js/api.js"></script>
+<script src="js/map.js"></script>
+<script src="js/section.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/views.js"></script>
 <script src="app.js"></script>
+</body>
+</html>
