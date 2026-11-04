@@ -244,6 +244,7 @@
     .well-label { display: none; }              /* the map contents list and the lead sheet still name every well */
     .map-ui.readout { inset-block-start: auto; inset-block-end: 56px; }
     .lead-label { transform: translate(-50%, 8px); }
+    .lead-label:not(.is-sel) { display: none; }   /* P2 shows the selected lead only; outlines stay tappable, the contents list names all */
   }
 }
 
@@ -610,6 +611,7 @@
     .map-ui.window, .map-ui.scale, .map-ui.legend, .well-label { display: none; }
     .map-ui.readout { inset-block-start: auto; inset-block-end: var(--space-3); }
     .lead-label { transform: translate(-50%, 8px); }
+    .lead-label:not(.is-sel) { display: none; }   /* P2 shows the selected lead only; outlines stay tappable, the contents list names all */
 
     /* the evidence panel is a sheet over the map on the Map tab */
     [data-ptab="map"] .panel-evidence { position: fixed; inset-inline: var(--space-3); inset-block-end: calc(var(--tabbar-h) + var(--space-1)); z-index: 6; max-block-size: 46dvh; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-md) var(--radius-md); box-shadow: var(--shadow-float), var(--shadow-ring); }
@@ -628,9 +630,16 @@
     .sheet-actions .btn { min-block-size: 44px; justify-content: center; }
     .sheet-actions .btn-primary { border-radius: var(--radius-md); }
     .pactions { display: flex !important; flex-wrap: wrap; gap: var(--space-2); padding-block-start: var(--space-2); }
+    [data-ptab]:not([data-ptab="map"]) .sheet-actions { display: none !important; }
+    [data-ptab="wells"] .view-toggle, [data-ptab="wells"] .panel-bottom .panel-head { display: none; }   /* the tab is the heading */
+    [data-ptab="wells"] .view { inset-block-start: 0; }
     [data-ptab="map"] .pactions { display: none !important; }
 
     /* chat: the answer sits in a card with the lead's trap tag and GCoS */
+    .panel-copilot .panel-head { display: none; }           /* the phone title block says Copilot */
+    .log { overflow-x: hidden; }
+    .msg-bot .md, .msg-bot .ev-row { overflow-wrap: anywhere; }
+    .ev { white-space: normal; max-inline-size: 100%; }
     .msg-bot { padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-bg-raised); border: 1px solid transparent; box-shadow: var(--shadow-ring); }
     .msg-bot .answer-head { display: flex !important; justify-content: space-between; align-items: center; gap: var(--space-2); padding-block-end: var(--space-1); }
     .composer .input { min-block-size: 44px; }
@@ -644,7 +653,7 @@
     .tabbar > button { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: 6px var(--space-4); border-radius: var(--radius-md); color: var(--color-text-secondary); font-size: var(--text-caption-size); line-height: var(--text-caption-line); min-inline-size: 64px; min-block-size: 44px; transition: background-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out; }
     .tabbar > button .icon { font-size: 20px; }
     .tabbar > button[aria-current="page"] { background: var(--color-accent-tint); color: var(--color-text-accent); }
-    main { padding-block-end: calc(var(--tabbar-h) + var(--space-2)); }
+    main { padding-block-end: 0; }
     dialog.pop { inline-size: calc(100vw - 32px); inset-inline-start: 16px !important; }
     dialog.memo { padding: var(--space-4); }
   }
