@@ -20,3 +20,4 @@ __pycache__/
 .env
 # synthetic SEG-Y from scripts/make_fake_segy.py
 fake_c1/
+fake_store/

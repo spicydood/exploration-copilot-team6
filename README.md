@@ -15,6 +15,7 @@ eval/        test bank + harness that writes a scoring sheet
 ```
 
 Backend work allocation, implementation order, and completion checks: [Atif and Edwin backend plan](docs/backend-plan.md).
+Step-by-step setup for laptops and the HPC, including how to push from the HPC: [Team setup](docs/team-setup.md).
 
 ## Run it on a laptop (synthetic survey, no data, no LLM)
 
