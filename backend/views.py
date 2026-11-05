@@ -6,10 +6,8 @@ from .tools import Tools
 
 
 def meta_view(store: Store) -> dict:
-    m = dict(store.meta)
-    m.pop("il_values", None)
-    m.pop("xl_values", None)
-    return m
+    # The frontend needs actual coordinates, including gaps and non-unit steps.
+    return dict(store.meta)
 
 
 def wells_view(store: Store) -> list[dict]:

@@ -22,7 +22,7 @@ import config  # noqa: E402
 from backend import llm  # noqa: E402
 from backend.agent import Agent  # noqa: E402
 from backend.render import section_png  # noqa: E402
-from backend.store import Store  # noqa: E402
+from backend.store import InvalidLocationError, Store  # noqa: E402
 from backend.tools import Tools  # noqa: E402
 from backend.views import lead_detail_view, leads_view, meta_view, wells_view  # noqa: E402
 
@@ -44,7 +44,9 @@ class ChatIn(BaseModel):
 
 
 def _key(msg: str, lead: str | None) -> str:
-    return f"{lead or '-'}|{re.sub(r'[^a-z0-9 ]', '', msg.lower()).strip()}"
+    # Version the key so old answers cannot replay the fixed ranking/location bugs.
+    # Preserve signs and decimals: -1000 and 1000 are different locations.
+    return json.dumps(["atif-fixes-v1", lead, msg.strip().lower()], ensure_ascii=False)
 
 
 @app.get("/api/health")
@@ -98,9 +100,13 @@ def render_png(name: str):
 
 @app.get("/api/section.png")
 def section(inline: int | None = None, crossline: int | None = None):
-    if inline is None and crossline is None:
-        raise HTTPException(400, "give inline or crossline")
-    return Response(section_png(store, inline=inline, crossline=crossline), media_type="image/png")
+    if (inline is None) == (crossline is None):
+        raise HTTPException(400, "give exactly one inline or crossline")
+    try:
+        image = section_png(store, inline=inline, crossline=crossline)
+    except InvalidLocationError as e:
+        raise HTTPException(400, str(e)) from e
+    return Response(image, media_type="image/png")
 
 
 @app.post("/api/chat")

@@ -105,11 +105,11 @@
   EC.S = {
     meta: null, wells: [], leads: [], health: null,
     attr: "sand", sel: null, detail: null, selWell: null,
-    evidence: {},               // id -> evidence item from the latest answers
+    evidence: {},               // id -> evidence item from the current answer; earlier messages own theirs
     audience: document.documentElement.getAttribute("data-audience") === "executive" ? "executive" : "geoscientist",
     blind: null,                // { well, step: "hide"|"predict"|"reveal", prediction }
     assumptions: { cost: null, value: null },   // USD M, from the asset team (Executive mode)
-    lastAnswer: null,           // { text, cited, lead }
+    lastAnswer: null,           // { text, cited, lead, evidence }
     busy: false,
   };
 
