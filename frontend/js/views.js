@@ -285,7 +285,7 @@
         <div><button type="button" class="btn btn-primary" data-act="predict">Predict what it found</button></div></div>`;
     } else {
       const first = p ? plain(paragraphs(p.text)[0] || "") : "";
-      const tags = (p?.cited || []).map((id) => `<span class="ev"><b>${esc(id)}</b>${esc(S.evidence?.[id]?.label || "")}</span>`).join("");
+      const tags = (p?.cited || []).map((id) => `<span class="ev"><b>${esc(id)}</b>${esc(p.evidence?.[id]?.label || "")}</span>`).join("");
       cards = `<div class="card"><p class="label secondary">Copilot prediction · before reveal</p>
         ${p ? `<p>${esc(first)}</p>${tags ? `<div class="ev-row">${tags}</div>` : ""}` : `<p class="caption">Waiting for the copilot’s answer…</p>`}
         ${b.step === "predict" && p ? `<div><button type="button" class="btn btn-primary" data-act="reveal">Reveal the log</button></div>` : ""}</div>`;
@@ -375,7 +375,7 @@
       const odds = isNum(d.gcos) && d.gcos > 0 ? d.gcos : null;
       const rec = a ? recommendation(a.text) : "";
       const alt = det?.alternatives?.[0];
-      const tags = (a?.cited || []).map((id) => `<span class="ev"><b>${esc(id)}</b>${esc(S.evidence?.[id]?.label || "")}</span>`).join("");
+      const tags = (a?.cited || []).map((id) => `<span class="ev"><b>${esc(id)}</b>${esc(a.evidence?.[id]?.label || "")}</span>`).join("");
       dlg.innerHTML = `<div class="memo-body">
         <div class="memo-top"><div>${overline}<h1 id="memo-h">Lead ${esc(d.id)}${/^lead\s*\d+$/i.test(d.name || "") ? "" : " · " + esc(d.name)}</h1></div>${actions}</div>
         <div class="card card-tint"><p class="label secondary">Recommendation</p>
@@ -462,7 +462,7 @@
     bus.on("answer", (p) => {
       if (p) lastAnswer = p;
       const b = S.blind;
-      if (b && b.step === "predict" && p?.text) { b.prediction = { text: p.text, cited: p.cited || [], lead: p.lead || null }; refreshBlind(); renderBody(); }
+      if (b && b.step === "predict" && p?.text) { b.prediction = { text: p.text, cited: p.cited || [], lead: p.lead || null, evidence: p.evidence || {} }; refreshBlind(); renderBody(); }
     });
     cur = { id: S.sel, detail: S.detail?.lead?.id === S.sel ? S.detail : null, error: null };
     if (S.audience === "executive" && document.documentElement.getAttribute("data-audience") !== "executive") document.documentElement.setAttribute("data-audience", "executive");

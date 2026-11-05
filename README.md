@@ -14,6 +14,8 @@ knowledge/   one-page geology cards the agent reads (Ruthan owns these)
 eval/        test bank + harness that writes a scoring sheet
 ```
 
+Backend work allocation, implementation order, and completion checks: [Atif and Edwin backend plan](docs/backend-plan.md).
+
 ## Run it on a laptop (synthetic survey, no data, no LLM)
 
 ```bash
@@ -108,6 +110,18 @@ python eval/run_eval.py --questions eval/questions.csv --tag gemma-v1
 
 Writes `eval/results/<time>-<tag>.csv` with empty score columns (grounded 0-3, correct 0-3,
 alternatives 0-2, clear 0-2). Ruthan scores; track the average per version.
+
+### Regression checks
+
+```bash
+pip install -r requirements-dev.txt
+python -m unittest discover -s tests -p "test_*.py" -v
+node --test tests/test_chat.mjs
+```
+
+The Python checks build a temporary synthetic survey and test ranking, exact coordinate lookup,
+invalid-location responses, and section images without HPC access. The JavaScript checks verify
+that each answer renders its own citation labels. Node is needed only for these JavaScript checks.
 
 ## Offline demo file
 

@@ -21,11 +21,22 @@ from .tools import Tools
 
 SIMILAR = re.compile(r"similar|look[- ]?alike|analog|like this|yet to be (tested|drilled)|untested", re.I)
 RANK = re.compile(r"rank|top|best|which lead|opportunit|prospect|where should|drill next|overview", re.I)
-RANKLIST = re.compile(r"\brank|\btop\b|\blist\b|all (the )?leads|compare (the )?leads|overview", re.I)
+RANKLIST = re.compile(
+    r"\brank(?:ing)?\b|\btop\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"(?:undrilled\s+|drilled\s+)?(?:leads|opportunities|prospects))\b|"
+    r"\blist\s+(?:(?:all|the)\s+)*(?:(?:undrilled|drilled)\s+)?(?:leads|opportunities|prospects)\b|"
+    r"\ball (?:the )?leads\b|\bcompare (?:the )?leads\b|\boverview\b", re.I)
 RISK = re.compile(r"wrong|alternative|risk|devil|uncertain|could fail|why not", re.I)
 WHY_DRY = re.compile(r"dry|fail|failed|why did|result", re.I)
 REFS = re.compile(r"\b(paper|publication|reference|citation|cite|journal|doi)\b", re.I)
-ILXL = re.compile(r"(?:inline|\bil)\s*[:#]?\s*(\d+).*?(?:crossline|xline|\bxl)\s*[:#]?\s*(\d+)", re.I | re.S)
+ILXL = re.compile(r"(?:inline|\bil)\s*[:#]?\s*([+-]?\d+(?:\.\d+)?).*?"
+                  r"(?:crossline|xline|\bxl)\s*[:#]?\s*([+-]?\d+(?:\.\d+)?)", re.I | re.S)
+
+
+def is_ranking(question: str) -> bool:
+    """Explicit lead rankings take priority over the UI's selected lead."""
+    analogue = re.search(r"similar|look[- ]?alike|analog|like this", question, re.I)
+    return bool(RANKLIST.search(question) and not analogue and not REFS.search(question))
 
 
 class Agent:
@@ -52,7 +63,9 @@ class Agent:
 
         yield {"type": "status", "text": "Planning which measurements to look at"}
         used_llm = self.mode == "gemma"
-        plan_iter = self._plan_llm(question, selected_lead, calls) if used_llm else None
+        # These requests have unambiguous tools, regardless of UI selection or LLM mode.
+        direct = bool(ILXL.search(question) or is_ranking(question))
+        plan_iter = self._plan_llm(question, selected_lead, calls) if used_llm and not direct else None
         fallback_reason = None
         if plan_iter is not None:
             try:
@@ -74,7 +87,8 @@ class Agent:
 
         yield {"type": "status", "text": "Writing the geological reasoning"}
         text = ""
-        writer_mode = "gemma" if used_llm and not fallback_reason else "offline"
+        location_error = any(c["tool"] == "value_at" and c["error"] for c in calls)
+        writer_mode = "gemma" if used_llm and not fallback_reason and not location_error else "offline"
         if writer_mode == "gemma":
             try:
                 for tok in llm.stream([
@@ -91,7 +105,8 @@ class Agent:
                 yield {"type": "token", "text": chunk}
 
         cited = sorted(set(re.findall(r"\bE\d+\b", text)), key=lambda x: int(x[1:]))
-        yield {"type": "done", "cited": cited, "unverified_numbers": unverified_numbers(text, evidence),
+        yield {"type": "done", "cited": cited,
+               "unverified_numbers": [] if location_error else unverified_numbers(text, evidence),
                "mode": writer_mode, "note": fallback_reason, "seconds": round(time.time() - t0, 1)}
 
     def answer(self, question: str, selected_lead: str | None = None) -> dict:
@@ -136,7 +151,23 @@ class Agent:
         wells = [w["name"] for w in self.s.wells if w["name"] in q.lower()]
         m = ILXL.search(q)
         if m:
-            return [("value_at", {"inline": int(m.group(1)), "crossline": int(m.group(2))}, "look up that location")]
+            return [("value_at", {"inline": m.group(1), "crossline": m.group(2)}, "look up that exact location")]
+        if is_ranking(q):
+            args = {"top": len(self.s.leads)}
+            limit = re.search(r"\btop\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b", q, re.I)
+            if limit:
+                words = dict(zip("one two three four five six seven eight nine ten".split(), range(1, 11)))
+                token = limit.group(1).lower()
+                args["top"] = int(token) if token.isdigit() else words[token]
+            if re.search(r"\b(?:undrilled|untested)\b", q, re.I):
+                args["drilled"] = False
+            elif re.search(r"\bdrilled\b", q, re.I):
+                args["drilled"] = True
+            for trap_type in ("Structural", "Stratigraphic", "Combination", "Unclassified"):
+                if re.search(rf"\b{trap_type}\b", q, re.I):
+                    args["trap_type"] = trap_type
+                    break
+            return [("get_leads", args, "rank the survey leads")]
         target = (lead_ids or [None])[0] or (self.s.lead_of_well(wells[0])["id"]
                                              if wells and self.s.lead_of_well(wells[0]) else None) or selected
         if SIMILAR.search(q):
@@ -167,7 +198,7 @@ class Agent:
 
     def _ensure_lead_evidence(self, q, selected, calls, register):
         """If the question is about a lead but no lead_evidence was fetched, fetch it."""
-        if any(c["tool"] == "lead_evidence" for c in calls) or REFS.search(q):
+        if any(c["tool"] == "lead_evidence" for c in calls) or REFS.search(q) or is_ranking(q):
             return
         lid = (re.findall(r"\bL\d+\b", q.upper()) or [selected])[0]
         if lid and self.s.lead(lid) and not ILXL.search(q):
@@ -379,6 +410,11 @@ class OfflineWriter:
 
     def point(self) -> str:
         va = self.call("value_at")
+        if va is None:
+            failed = next((c for c in self.calls if c["tool"] == "value_at" and c["error"]), None)
+            reason = failed["error"] if failed else "The location could not be checked."
+            return (f"**Location unavailable** - {reason} No measurement was returned. "
+                    "Choose an inline and crossline shown on the survey.")
         r = va["result"]
         v, thr = r["values"], r["sand_threshold"]
         inside = r["in_lead"]
