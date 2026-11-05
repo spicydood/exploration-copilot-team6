@@ -32,12 +32,15 @@ python3 -m venv ~/copilot-env && source ~/copilot-env/bin/activate
 pip install --upgrade pip && pip install -r requirements.txt
 export COPILOT_STORE_DIR=/data/epic20/APGCE/<your_team>/copilot_store
 
-# 2. Ruthan picks the reservoir window (two-way time, ms) in DUG Insight, then:
+# 2. check the data and get a provisional reservoir window (reads headers + a sample of traces)
+python scripts/check_real_data.py
+
+# 3. run the engine with that window, or with Ruthan's window from DUG Insight:
 python -m engine.precompute --t0 <start_ms> --t1 <end_ms>
 #    optional: --horizon top_reservoir.txt   (X Y TIME export from DUG Insight)
 #    optional: --sand-threshold 0.6          (calibrated at the wells)
 
-# 3. serve on the login node and open http://localhost:8800 in Firefox on the remote desktop
+# 4. serve on the login node and open http://localhost:8800 in Firefox on the remote desktop
 uvicorn backend.app:app --host 127.0.0.1 --port 8800
 ```
 

@@ -18,3 +18,5 @@ __pycache__/
 *.pyc
 .venv/
 .env
+# synthetic SEG-Y from scripts/make_fake_segy.py
+fake_c1/
