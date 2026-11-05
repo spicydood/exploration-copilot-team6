@@ -21,3 +21,5 @@ __pycache__/
 # synthetic SEG-Y from scripts/make_fake_segy.py
 fake_c1/
 fake_store/
+# real-data question bank and Ruthan's reference answers stay on the HPC
+eval/questions.csv
