@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 
 from engine.leads import similar as _similar
-from .store import Store
+from .store import InvalidLocationError, Store
 
 TOOL_SPECS = [
     {"name": "get_leads", "description": "List leads ranked by geological chance of success (GCoS). "
@@ -68,7 +68,7 @@ class Tools:
         if drilled is not None and str(drilled).lower() in ("true", "false"):
             want = str(drilled).lower() == "true"
             rows = [d for d in rows if d["drilled"] == want]
-        rows = rows[: int(top or 5)]
+        rows = rows[: max(0, int(top if top is not None else 5))]
         ev = []
         for d in rows:
             ev.append(_ev(f"{d['id']} GCoS ({d['trap_type']}, {'drilled' if d['drilled'] else 'undrilled'})",
@@ -169,7 +169,11 @@ class Tools:
 
     def value_at(self, inline, crossline):
         i, j = self.s.il_index(inline), self.s.xl_index(crossline)
-        vals = {k: round(float(self.s.map(k)[i, j]), 3) for k in NAMES}
+        inline, crossline = self.s.il_number(i), self.s.xl_number(j)
+        if not np.isfinite(self.s.map("sand")[i, j]):
+            raise InvalidLocationError(f"No survey data is available at inline {inline}, crossline {crossline}.")
+        vals = {k: round(float(self.s.map(k)[i, j]), 3) if np.isfinite(self.s.map(k)[i, j]) else None
+                for k in NAMES}
         lead = self.s.lead_at(i, j)
         ref = {"point": [i, j]}
         ev = [_ev(f"{NAMES[k]} at IL {inline} / XL {crossline}", v, ref={**ref, "map": k}) for k, v in vals.items()]

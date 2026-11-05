@@ -1,6 +1,6 @@
 /* Exploration Copilot — chat: the streaming answer, its step trail, evidence chips and the evidence dialog.
    Owns EC.chat and writes EC.S.evidence, EC.S.lastAnswer and EC.S.busy.
-   EC.util and EC.bus are created by app.js, which loads after this file, so they are bound lazily. */
+   EC.util and EC.bus are created by api.js; bind lazily for the standalone renderer. */
 (() => {
   "use strict";
   const EC = (window.EC = window.EC || {});
@@ -10,6 +10,7 @@
   let form, qInput, sendBtn, log, statusEl, suggestEl, bannersEl, pop;
   let ctrl = null;          // AbortController of the answer being streamed
   let openChip = null;      // the .ev chip whose evidence dialog is open
+  const messageEvidence = new WeakMap(); // each answer owns its E1, E2, ... references
 
   // ------------------------------------------------------------------ small formatters
   const EM = "em";          // built at runtime so the template never holds a literal italic tag
@@ -29,8 +30,8 @@
   /* Lower-case everything after the first character except ids and acronyms (L3, IL, AVO, GCoS, Vp/Vs). */
   const sentenceCase = (s) => capFirst(s.trim()).split(" ").map((w, i) => (i && /^[A-Z][a-z]*$/.test(w) ? w.toLowerCase() : w)).join(" ");
 
-  const chipHtml = (id) => {
-    const it = EC.S.evidence[id];
+  const chipHtml = (id, evidence) => {
+    const it = evidence[id];
     const label = it ? `${shortLabel(it.label)} ${valueText(it)}` : "";
     return `<button type="button" class="ev" aria-expanded="false" data-id="${esc(id)}"><b>${esc(id)}</b>${esc(label)}</button>`;
   };
@@ -43,20 +44,20 @@
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g, `$1<${EM}>$2</${EM}>`);
   /* Code spans and [E12] tags are cut out first so their digits are never wrapped. */
-  function inline(s) {
+  function inline(s, evidence) {
     const re = /`([^`]+)`|\[(E\d+)\]/g; let out = "", last = 0, m;
-    while ((m = re.exec(s))) { out += prose(s.slice(last, m.index)) + (m[1] != null ? `<code>${esc(m[1])}</code>` : chipHtml(m[2])); last = re.lastIndex; }
+    while ((m = re.exec(s))) { out += prose(s.slice(last, m.index)) + (m[1] != null ? `<code>${esc(m[1])}</code>` : chipHtml(m[2], evidence)); last = re.lastIndex; }
     return out + prose(s.slice(last));
   }
-  const runIn = (t) => `<p class="run-in">${inline(sentenceCase(t))}</p>`;
-  function paragraph(text) {
+  const runIn = (t, evidence) => `<p class="run-in">${inline(sentenceCase(t), evidence)}</p>`;
+  function paragraph(text, evidence) {
     const h = text.match(/^#{1,6}\s+(.+?)\s*#*$/);
-    if (h) return runIn(h[1]);
+    if (h) return runIn(h[1], evidence);
     const b = text.match(/^\*\*([^*]+?)\*\*\s*(?:[-–—]\s*([\s\S]+))?$/);
-    if (b && b[1].trim().split(/\s+/).length <= 6 && !/[.:;]$/.test(b[1].trim())) return runIn(b[1]) + (b[2] ? `<p>${inline(capFirst(b[2].trim()))}</p>` : "");
-    return `<p>${inline(text)}</p>`;
+    if (b && b[1].trim().split(/\s+/).length <= 6 && !/[.:;]$/.test(b[1].trim())) return runIn(b[1], evidence) + (b[2] ? `<p>${inline(capFirst(b[2].trim()), evidence)}</p>` : "");
+    return `<p>${inline(text, evidence)}</p>`;
   }
-  function renderMd(src) {
+  function renderMd(src, evidence = EC.S.evidence) {
     const lines = String(src || "").split("\n"); let out = "", i = 0;
     const isList = (l) => /^\s*[-*] /.test(l) || /^\s*\d+\. /.test(l);
     const isHead = (l) => /^\s*#{1,6}\s+/.test(l) || /^\s*\*\*[^*]+\*\*\s*$/.test(l);
@@ -66,18 +67,18 @@
         const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
         const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
         const body = rows.filter((r, k) => !(k === 1 && /^[\s|:-]+$/.test(r)));
-        out += `<div class="tw"><table><thead><tr>${cells(body[0]).map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>` +
-          body.slice(1).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
+        out += `<div class="tw"><table><thead><tr>${cells(body[0]).map((c) => `<th>${inline(c, evidence)}</th>`).join("")}</tr></thead><tbody>` +
+          body.slice(1).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c, evidence)}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
       } else if (isList(l)) {
         const ordered = /^\s*\d+\. /.test(l); const items = [];
         while (i < lines.length && isList(lines[i])) items.push(lines[i++].replace(/^\s*([-*]|\d+\.) /, ""));
-        out += `<${ordered ? "ol" : "ul"}>${items.map((t) => `<li>${inline(t)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`;
+        out += `<${ordered ? "ol" : "ul"}>${items.map((t) => `<li>${inline(t, evidence)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`;
       } else if (l.trim() === "") { i++; }
       else {
         const para = [];
         if (isHead(l)) para.push(lines[i++].trim());   // a heading line is its own block even without blank lines around it
         else while (i < lines.length && lines[i].trim() !== "" && !isList(lines[i]) && !/^\s*\|/.test(lines[i]) && !isHead(lines[i])) para.push(lines[i++].trim());
-        out += paragraph(para.join(" "));
+        out += paragraph(para.join(" "), evidence);
       }
     }
     return out;
@@ -103,10 +104,14 @@
     if (!bind() || !log) return;
     const q = String(question || "").trim();
     if (!q || EC.S.busy) return;
+    const selectedLead = EC.S.sel;
+    const evidence = {};
+    EC.S.evidence = evidence; // compatibility lookup for the current answer only
     setBusy(true);
     const stick = nearBottom();
     const u = document.createElement("div"); u.className = "msg msg-user"; u.textContent = q; log.append(u);
     const b = document.createElement("div"); b.className = "msg msg-bot";
+    messageEvidence.set(b, evidence);
     const lead = EC.S.detail?.lead?.id === EC.S.sel ? EC.S.detail.lead : null;   // phone answer card head (CSS shows it ≤ 600 px)
     const head = lead ? `<div class="answer-head"><span class="trap t-${esc(lead.trap_type)}">${esc(lead.trap_type)}</span><span class="num-sm secondary">GCoS ${esc(fmt(lead.gcos, 3))}</span></div>` : "";
     b.innerHTML = head + `<details class="trail" open><summary>${icon("chevron-down")}<span>How this answer is built</span></summary><ol class="steps"></ol></details>` +
@@ -117,14 +122,14 @@
     const trail = b.querySelector("details.trail"), summary = trail.querySelector("summary span"), steps = trail.querySelector(".steps");
     const md = b.querySelector(".md"), facts = b.querySelector("[data-facts]"), evRow = facts.querySelector(".ev-row"), doneLine = b.querySelector(".done-line");
     let text = "", pending = false, nSteps = 0, seen = [], active = null, finished = false;
-    const paint = () => { pending = false; const s = nearBottom(); md.innerHTML = renderMd(text); if (s) scrollDown(); };
+    const paint = () => { pending = false; const s = nearBottom(); md.innerHTML = renderMd(text, evidence); if (s) scrollDown(); };
     const markDone = (li) => { if (li.className === "is-error") return; li.className = "is-done"; li.querySelector(".ind").innerHTML = icon("check"); };
     const finishSteps = () => { for (const li of steps.children) markDone(li); active = null; };
     const opts = { audience: EC.S.audience };
     if (EC.S.blind?.well) opts.hideWells = [EC.S.blind.well];
     ctrl = new AbortController(); opts.signal = ctrl.signal;
     try {
-      for await (const ev of EC.api.chat(q, EC.S.sel, opts)) {
+      for await (const ev of EC.api.chat(q, selectedLead, opts)) {
         if (ev.type === "status") {
           if (!text) md.innerHTML = `<p class="secondary">${esc(ev.text)}…</p>`;
         } else if (ev.type === "tool") {
@@ -139,8 +144,8 @@
           const s = nearBottom();
           for (const it of ev.items || []) {
             if (!it?.id) continue;
-            EC.S.evidence[it.id] = it; seen.push(it.id);
-            evRow.insertAdjacentHTML("beforeend", chipHtml(it.id));
+            evidence[it.id] = it; seen.push(it.id);
+            evRow.insertAdjacentHTML("beforeend", chipHtml(it.id, evidence));
             EC.bus.emit("fact", it);   // arrival: stored and listed, never pins the map (a click on the tag does that)
           }
           if (ev.items?.length) facts.hidden = false;
@@ -161,7 +166,7 @@
           doneLine.innerHTML = `<span>${esc(cited.length)} of ${esc(plural(seen.length, "evidence item", "evidence items"))} cited</span>` +
             `<span>${ev.mode === "gemma" ? "Gemma 4" : "Offline reasoner"}</span><span>${num(ev.seconds, "s", 1)}</span>${ev.note ? `<span>${esc(ev.note)}</span>` : ""}`;
           announce(`Answer ready. ${plural(cited.length, "evidence item", "evidence items")} cited` + (bad.length ? `, ${plural(bad.length, "number", "numbers")} not in the evidence.` : "."));
-          EC.S.lastAnswer = { text, cited, lead: EC.S.sel };
+          EC.S.lastAnswer = { text, cited, lead: selectedLead, evidence: { ...evidence } };
           EC.bus.emit("answer", EC.S.lastAnswer);
           if (nearBottom()) scrollDown();
         }
@@ -202,7 +207,7 @@
   }
   function openPop(chip) {
     if (!pop || !bind()) return;
-    const it = EC.S.evidence[chip.dataset.id];
+    const it = messageEvidence.get(chip.closest(".msg-bot"))?.[chip.dataset.id];
     if (!it) return;
     if (openChip === chip && pop.open) { closePop(); return; }
     if (pop.open) closePop(false);
@@ -295,5 +300,5 @@
     EC.bus.on("well", (p) => setSuggestions(EC.S.sel, p?.well?.name));
   }
 
-  EC.chat = { init, ask, welcome, hasMessages, banner, clearBanners, setSuggestions, renderMd: (src) => (bind() ? renderMd(src) : "") };
+  EC.chat = { init, ask, welcome, hasMessages, banner, clearBanners, setSuggestions, renderMd: (src, evidence) => (bind() ? renderMd(src, evidence) : "") };
 })();

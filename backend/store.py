@@ -8,6 +8,10 @@ from pathlib import Path
 import numpy as np
 
 
+class InvalidLocationError(ValueError):
+    """The requested location has no exact cell in this survey."""
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -54,13 +58,32 @@ class Store:
         return np.load(self.root / "cubes" / "times.npy")
 
     # ---------- grid helpers
+    def _grid_index(self, value, axis: str) -> int:
+        values = np.asarray(self.meta[f"{axis}_values"])
+        label = "inline" if axis == "il" else "crossline"
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            number = np.nan
+        if isinstance(value, (bool, np.bool_)) or not np.isfinite(number) or not number.is_integer():
+            raise InvalidLocationError(f"Invalid {label} {value!r}; give a whole-number survey coordinate.")
+        number = int(number)
+        if not len(values):
+            raise InvalidLocationError(f"No {label} coordinates are available in this survey.")
+        if number < values[0] or number > values[-1]:
+            raise InvalidLocationError(
+                f"The requested {label} {number} is outside the survey "
+                f"(valid range {values[0]} to {values[-1]}).")
+        index = int(np.searchsorted(values, number))
+        if index >= len(values) or values[index] != number:
+            raise InvalidLocationError(f"The requested {label} {number} is not present in the survey grid.")
+        return index
+
     def il_index(self, inline: int) -> int:
-        v = np.asarray(self.meta["il_values"])
-        return int(np.clip(np.searchsorted(v, int(inline)), 0, len(v) - 1))
+        return self._grid_index(inline, "il")
 
     def xl_index(self, xline: int) -> int:
-        v = np.asarray(self.meta["xl_values"])
-        return int(np.clip(np.searchsorted(v, int(xline)), 0, len(v) - 1))
+        return self._grid_index(xline, "xl")
 
     def il_number(self, i: int) -> int:
         return int(self.meta["il_values"][int(round(i))])

@@ -11,6 +11,10 @@ from .store import Store
 
 
 def section_png(store: Store, inline: int | None = None, crossline: int | None = None) -> bytes:
+    # Validate before reading cached images, including images made by older versions.
+    if (inline is None) == (crossline is None):
+        raise ValueError("Give exactly one inline or crossline for a section.")
+    index = store.il_index(inline) if inline is not None else store.xl_index(crossline)
     cache = Path(store.root) / "sections"
     cache.mkdir(exist_ok=True)
     key = f"il{inline}" if inline is not None else f"xl{crossline}"
@@ -24,14 +28,14 @@ def section_png(store: Store, inline: int | None = None, crossline: int | None =
 
     times = store.cube_times
     if inline is not None:
-        i = store.il_index(inline)
+        i = index
         amp = np.asarray(store.cube_full[i, :, :], dtype=np.float32).T
         sand = np.asarray(store.cube_sand[i, :, :], dtype=np.float32).T
         axis_vals = store.meta["xl_values"]
         wells = [(w["j"], w["name"]) for w in store.wells if w.get("i") is not None and abs(w["i"] - i) <= 2]
         title, xlab = f"Inline {inline}", "Crossline"
     else:
-        j = store.xl_index(crossline)
+        j = index
         amp = np.asarray(store.cube_full[:, j, :], dtype=np.float32).T
         sand = np.asarray(store.cube_sand[:, j, :], dtype=np.float32).T
         axis_vals = store.meta["il_values"]
