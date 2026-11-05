@@ -23,7 +23,7 @@ def wells_view(store: Store) -> list[dict]:
 
 def leads_view(store: Store) -> list[dict]:
     keep = ("id", "name", "trap_type", "subtype", "gcos", "area_km2", "risked_area_km2", "drilled",
-            "wells_inside", "nearest_well", "polygon", "centroid", "scorecard")
+            "wells_inside", "nearest_well", "polygon", "centroid", "scorecard", "score_basis", "score_note")
     return [{k: d[k] for k in keep} for d in store.leads]
 
 

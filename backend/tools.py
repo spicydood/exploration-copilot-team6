@@ -35,6 +35,10 @@ NAMES = {"sand": "Sand probability", "vpvs": "Vp/Vs", "pimp": "P-impedance",
          "avo_diff": "Far-minus-near amplitude", "rms_full": "Full-stack RMS amplitude"}
 
 
+def result_text(well: dict) -> str:
+    return (well.get("result_text") or well["result"]) if well.get("result") in ("discovery", "dry") else "unknown"
+
+
 def _ev(label, value, unit="", compare=None, ref=None, note=None):
     return {"label": label, "value": value, "unit": unit, "compare": compare, "ref": ref or {}, "note": note}
 
@@ -50,9 +54,11 @@ class Tools:
         self.s = store
 
     def run(self, name: str, args: dict) -> dict:
-        fn = getattr(self, name, None)
-        if fn is None or name.startswith("_") or name == "run":
+        if not isinstance(name, str) or name not in {spec["name"] for spec in TOOL_SPECS}:
             return {"error": f"unknown tool {name}", "evidence": []}
+        if not isinstance(args, dict):
+            return {"error": f"bad arguments for {name}: expected an object", "evidence": []}
+        fn = getattr(self, name)
         try:
             return fn(**(args or {}))
         except TypeError as e:
@@ -108,13 +114,22 @@ class Tools:
                 f"{sc['reservoir']} / {sc['trap']} / {sc['seal']} / {sc['charge']}", ref=ref),
             _ev(f"{d['id']} GCoS", d["gcos"], "", ref=ref),
         ]
+        for item in ev:
+            if "GCoS" in item["label"] or "scorecard" in item["label"]:
+                item["note"] = self.s.meta["score_note"]
+                item["kind"] = "assumption"
+            elif "trap type" in item["label"]:
+                item["kind"] = "interpretation"
+            else:
+                item["kind"] = "derived_measurement"
         wells = []
         for n in d["wells_inside"]:
             w = self.s.well(n) or {}
             wells.append({"well": n, "result": w.get("result"), "result_text": w.get("result_text")})
-            ev.append(_ev(f"well {n} inside {d['id']}: result", w.get("result_text") or w.get("result"),
+            ev.append(_ev(f"well {n} inside {d['id']}: result", result_text(w),
                           ref={"well": n, "lead": d["id"]}))
-        if "discovery" in cal and "dry" in cal:
+        if all(cal.get(outcome, {}).get("vpvs") is not None and cal.get(outcome, {}).get("sand") is not None
+               for outcome in ("discovery", "dry")):
             ev.append(_ev("Vp/Vs at discovery wells vs dry wells", cal["discovery"]["vpvs"], "",
                           compare=cal["dry"]["vpvs"], ref={"map": "vpvs"}))
             ev.append(_ev("Sand probability at discovery wells vs dry wells", cal["discovery"]["sand"], "",
@@ -129,7 +144,7 @@ class Tools:
         lead = self.s.lead_of_well(w["name"])
         logs = w.get("logs", {})
         ref = {"well": w["name"]}
-        ev = [_ev(f"well {w['name']} result", w.get("result_text") or w.get("result"), ref=ref)]
+        ev = [_ev(f"well {w['name']} result", result_text(w), ref=ref)]
         if w.get("i") is not None:
             ev.append(_ev(f"well {w['name']} location inline / crossline",
                           f"{self.s.il_number(w['i'])} / {self.s.xl_number(w['j'])}", ref=ref))
@@ -143,7 +158,7 @@ class Tools:
             if k in NAMES:
                 ev.append(_ev(f"well {w['name']} {NAMES[k]} at well location", v, ref={**ref, "map": k}))
         cal = self.s.meta.get("calibration", {})
-        if "discovery" in cal and "dry" in cal:
+        if all(cal.get(outcome, {}).get("vpvs") is not None for outcome in ("discovery", "dry")):
             ev.append(_ev("Vp/Vs at discovery wells vs dry wells", cal["discovery"]["vpvs"], "",
                           compare=cal["dry"]["vpvs"], ref={"map": "vpvs"}))
         return {"result": {"well": w["name"], "result": w.get("result"), "result_text": w.get("result_text"),

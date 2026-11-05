@@ -1,7 +1,7 @@
 """The Exploration Copilot agent.
 
 Stage 1 (plan): choose tools, run them, number every returned fact as evidence [E1], [E2], ...
-Stage 2 (write): turn the evidence into a cited answer, streamed token by token.
+Stage 2 (write): complete and check a cited answer, then emit its text to the UI.
 
 Both stages use Gemma 4 when LLM=gemma, and fall back to a rule-based planner and a
 template writer when the endpoint is slow, down, or LLM=offline. The fallback means the
@@ -18,6 +18,7 @@ import config
 from . import llm, prompts
 from .store import Store
 from .tools import Tools
+from .validation import check_answer
 
 SIMILAR = re.compile(r"similar|look[- ]?alike|analog|like this|yet to be (tested|drilled)|untested", re.I)
 RANK = re.compile(r"rank|top|best|which lead|opportunit|prospect|where should|drill next|overview", re.I)
@@ -64,7 +65,7 @@ class Agent:
         yield {"type": "status", "text": "Planning which measurements to look at"}
         used_llm = self.mode == "gemma"
         # These requests have unambiguous tools, regardless of UI selection or LLM mode.
-        direct = bool(ILXL.search(question) or is_ranking(question))
+        direct = bool(ILXL.search(question) or is_ranking(question) or REFS.search(question))
         plan_iter = self._plan_llm(question, selected_lead, calls) if used_llm and not direct else None
         fallback_reason = None
         if plan_iter is not None:
@@ -75,8 +76,8 @@ class Agent:
                     yield {"type": "tool", "name": name, "args": args, "why": why,
                            "evidence_ids": ids, "error": out.get("error")}
             except llm.LLMError as e:
-                fallback_reason = "Gemma couldn't plan, so rules chose the measurements"
-        if not calls:
+                fallback_reason = f"planner fell back to rules ({e.__class__.__name__})"
+        if not any(not call["error"] for call in calls):
             for name, args, why in self._plan_rules(question, selected_lead):
                 out = self.tools.run(name, args)
                 ids = register(name, args, out)
@@ -88,34 +89,39 @@ class Agent:
         yield {"type": "status", "text": "Writing the geological reasoning"}
         text = ""
         location_error = any(c["tool"] == "value_at" and c["error"] for c in calls)
-        writer_mode = "gemma" if used_llm and not fallback_reason and not location_error else "offline"
+        writer_mode = "gemma" if used_llm and not fallback_reason and not location_error and not REFS.search(question) else "offline"
+        rejected_issues = []
         if writer_mode == "gemma":
             try:
-                for tok in llm.stream([
+                # Keep an incomplete or rejected draft out of both the UI and the cache.
+                text = "".join(llm.stream([
                         {"role": "system", "content": prompts.writer_prompt(question)},
-                        {"role": "user", "content": self._writer_user(question, evidence, calls)}]):
-                    text += tok
-                    yield {"type": "token", "text": tok}
-            except llm.LLMError:
-                fallback_reason = ("Gemma stopped partway, so the offline reasoner answered" if text
-                                   else "Gemma didn't answer, so the offline reasoner did")
+                        {"role": "user", "content": self._writer_user(question, evidence, calls)}]))
+                rejected_issues = check_answer(text, evidence, self.s.wells)
+                if rejected_issues:
+                    raise llm.LLMError("The answer failed evidence checks.")
+            except llm.LLMError as e:
+                fallback_reason = ("Gemma answer failed evidence checks; using the offline reasoner."
+                                   if rejected_issues else "Gemma response was interrupted or unavailable; using the offline reasoner.")
                 writer_mode = "offline"
-            if writer_mode == "gemma" and not text.strip():
-                fallback_reason, writer_mode = "Gemma returned an empty answer, so the offline reasoner did", "offline"
-            if writer_mode == "offline" and text:
-                # Tokens already reached the client: tell it to drop them before the offline answer,
-                # so one answer is shown, never half a model answer joined to the template.
-                yield {"type": "reset", "text": "Gemma stopped partway. Writing the answer with the offline reasoner"}
-                text = ""
         if writer_mode == "offline":
-            text = self._write_offline(question, selected_lead, evidence, calls)
-            for chunk in re.findall(r"\S+\s*", text):
-                yield {"type": "token", "text": chunk}
+            try:
+                text = self._write_offline(question, selected_lead, evidence, calls)
+            except (KeyError, TypeError, ValueError):
+                text = ("The available measurements are incomplete for this question. "
+                        "Check the selected interval, well placement and missing attributes before interpreting this lead.")
+                fallback_reason = "Insufficient data for the evidence template."
+        for chunk in re.findall(r"\S+\s*", text):
+            yield {"type": "token", "text": chunk}
 
         cited = sorted(set(re.findall(r"\bE\d+\b", text)), key=lambda x: int(x[1:]))
+        primary = next((c["result"]["lead"]["id"] for c in calls
+                        if c["tool"] == "lead_evidence" and not c["error"]), None)
         yield {"type": "done", "cited": cited,
                "unverified_numbers": [] if location_error else unverified_numbers(text, evidence),
-               "mode": writer_mode, "note": fallback_reason, "seconds": round(time.time() - t0, 1)}
+               "mode": writer_mode, "note": fallback_reason, "lead": primary,
+               "rejected_issues": rejected_issues, "cacheable": not fallback_reason and not location_error,
+               "seconds": round(time.time() - t0, 1)}
 
     def answer(self, question: str, selected_lead: str | None = None) -> dict:
         """Non-streaming helper for the eval harness."""
@@ -123,8 +129,6 @@ class Agent:
         for ev in self.stream(question, selected_lead):
             if ev["type"] == "token":
                 out["text"] += ev["text"]
-            elif ev["type"] == "reset":
-                out["text"] = ""
             elif ev["type"] == "tool":
                 out["tools"].append(ev["name"])
             elif ev["type"] == "evidence":
@@ -144,7 +148,9 @@ class Agent:
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": "Reply with valid JSON only."}]
                 step = llm.parse_json(llm.chat(msgs, max_tokens=200))
-            if not step or step.get("done") or "tool" not in step:
+            if not step:
+                raise llm.LLMError("The model planner returned invalid JSON.")
+            if step.get("done") or "tool" not in step:
                 return
             name, args = step["tool"], step.get("args") or {}
             yield name, args, step.get("why", "")
@@ -208,7 +214,7 @@ class Agent:
 
     def _ensure_lead_evidence(self, q, selected, calls, register):
         """If the question is about a lead but no lead_evidence was fetched, fetch it."""
-        if any(c["tool"] == "lead_evidence" for c in calls) or REFS.search(q) or is_ranking(q):
+        if any(c["tool"] == "lead_evidence" and not c["error"] for c in calls) or REFS.search(q) or is_ranking(q):
             return
         lid = (re.findall(r"\bL\d+\b", q.upper()) or [selected])[0]
         if lid and self.s.lead(lid) and not ILXL.search(q):
@@ -234,12 +240,12 @@ class Agent:
 
     def _write_offline(self, q, selected, evidence, calls) -> str:
         W = OfflineWriter(self.s, evidence, calls)
-        tools = [c["tool"] for c in calls]
+        tools = [c["tool"] for c in calls if not c["error"]]
         if REFS.search(q):
             return ("I don't have a source for that. My evidence is only the measurements made on this survey's "
                     "seismic and well data, so I won't name a paper or reference. Ask me about a lead or a well "
                     "and I will cite the measurements instead.")
-        if "value_at" in tools:
+        if any(c["tool"] == "value_at" for c in calls):
             return W.point()
         if RANKLIST.search(q) and "get_leads" in tools:
             return W.ranking()
@@ -294,7 +300,7 @@ class OfflineWriter:
             why.append("no clear closing geometry was measured, so the trap is unproven")
         cal = self.s.meta.get("calibration", {})
         cal_line = ""
-        if "discovery" in cal and "dry" in cal:
+        if all(cal.get(outcome, {}).get("vpvs") is not None for outcome in ("discovery", "dry")):
             cal_line = (f" At wells, discoveries average Vp/Vs {cal['discovery']['vpvs']} against "
                         f"{cal['dry']['vpvs']} for dry wells {self.tag('Vp/Vs at discovery')}.")
         ps = [
@@ -332,8 +338,10 @@ class OfflineWriter:
         results = [w["result"] for w in res["wells"]]
         if "discovery" in results:
             rec = "treat as a proven play: appraise it and use it as the analog for undrilled look-alikes"
-        elif results:
+        elif "dry" in results and "unknown" not in results:
             rec = "downgrade unless the failure at the well is explained and avoidable elsewhere"
+        elif results:
+            rec = "verify the recorded well outcomes before inferring success or failure"
         elif d["gcos"] >= 0.15:
             rec = "mature to prospect: run AVO modelling at the analog well and map the seal"
         else:
@@ -341,8 +349,8 @@ class OfflineWriter:
         weakest = min(d["scorecard"], key=d["scorecard"].get)
         out = [
             f"**Opportunity** - {d['id']} is a {d['trap_type'].lower()} lead ({d['subtype']}), "
-            f"{d['area_km2']} km² {self.tag('area', d['id'])}, with a geological chance of success of "
-            f"{d['gcos']} {self.tag('GCoS', d['id'])}. {drilled} Recommendation: {rec}.",
+            f"{d['area_km2']} km² {self.tag('area', d['id'])}, with a provisional screening score of "
+            f"{d['gcos']} {self.tag('GCoS', d['id'])}. This is not a calibrated probability. {drilled} Recommendation: {rec}.",
             "**Trap type and why** - " + "; ".join(why) + ".",
             "**Petroleum system**\n" + "\n".join(ps),
             "**What could make this wrong** - " + (f"{alt['alternative']} De-risk: {alt['de_risk']}" if alt
@@ -385,36 +393,41 @@ class OfflineWriter:
         r = ws["result"]
         w = self.s.well(r["well"])
         logs = w.get("logs", {})
-        out = [f"**{r['well']}** - result: {r['result_text'] or r['result']} {self.tag('result')}. "
-               f"Inline {r['inline']}, crossline {r['crossline']} {self.tag('location inline')}."]
+        outcome = r["result"] if r["result"] in ("discovery", "dry") else "unknown"
+        location = (f"Inline {r['inline']}, crossline {r['crossline']} {self.tag('location inline')}."
+                    if r["inline"] is not None and r["crossline"] is not None else "The well location is unavailable.")
+        out = [f"**{r['well']}** - result: {outcome} {self.tag('result')}. {location}"]
+        if outcome == "unknown":
+            out.append("The recorded outcome is unknown. I cannot establish whether this well succeeded or failed; "
+                       "confirm its outcome before using it to explain a discovery or a dry hole.")
         if logs.get("res_in_sand_p90") is not None:
             out.append(f"Logs: sands make up {int(100 * logs.get('sand_fraction', 0))}% of the logged interval "
                        f"{self.tag('sand fraction')}, with sand resistivity (P90) {logs['res_in_sand_p90']} ohm.m vs "
                        f"{logs.get('res_in_shale_median')} in shale {self.tag('resistivity')}.")
         le = self.call("lead_evidence")
-        if le:
+        if le and r.get("in_lead") == le["result"]["lead"]["id"]:
             d = self.s.lead(le["args"]["lead_id"])
             why, ps = self._lead_sections(d, le["result"])
             out.append(f"It tested {d['id']}, a {d['trap_type'].lower()} lead:\n" + "\n".join(ps))
             if w.get("result") == "dry":
-                out.append("**Most likely reason it failed** - " + self._dry_reason(w, d, le))
+                out.append("**Possible explanations for the dry result** - " + self._dry_reason(w, d, le))
         else:
-            out.append("The well does not sit inside a mapped lead, which is consistent with no reservoir "
-                       "or trap at this location.")
+            out.append("No mapped lead is associated with this well. That does not establish whether reservoir, "
+                       "trap or hydrocarbons are absent; check the well position and the interpreted interval.")
         return "\n\n".join(out)
 
     def _dry_reason(self, w, d, le) -> str:
         cal = self.s.meta.get("calibration", {})
         at = (w.get("attributes_at_well") or {})
-        if "discovery" in cal and "dry" in cal and "vpvs" in at:
+        if all(cal.get(outcome, {}).get("vpvs") is not None for outcome in ("discovery", "dry")) and at.get("vpvs") is not None:
             v, dv, wv = at["vpvs"], cal["discovery"]["vpvs"], cal["dry"]["vpvs"]
             if abs(v - wv) < abs(v - dv):
                 return (f"charge. The reservoir is there (sand probability {at.get('sand')} at the well "
                         f"{self.tag('Sand probability at well')}), but Vp/Vs at the well is {v} "
                         f"{self.tag('Vp/Vs at well')}, closer to the dry-well average {wv} than to the "
-                        f"discovery average {dv} {self.tag('Vp/Vs at discovery')}: a water-wet sand. "
-                        + ("The fault next to it likely separates it from the charged block, so the fault "
-                           "probably seals." if d["flags"]["faulted"] else ""))
+                        f"discovery average {dv} {self.tag('Vp/Vs at discovery')}. This is consistent with a "
+                        "charge-related explanation but does not establish fluid type or the cause of failure. "
+                        + ("Fault sealing requires a separate check." if d["flags"]["faulted"] else ""))
         alts = le["result"]["alternatives"]
         return " ".join(f"({k}) {a['alternative']}" for k, a in enumerate(alts, 1)) or "not resolved by the evidence."
 
@@ -441,11 +454,12 @@ class OfflineWriter:
     def ranking(self) -> str:
         gl = self.call("get_leads")
         rows = gl["result"]["leads"] if gl else []
-        lines = ["**Leads ranked by geological chance of success**", "",
+        lines = ["**Leads ranked by provisional screening score**", "",
                  "| Lead | Trap | Area km² | GCoS | Drilled |", "|---|---|---|---|---|"]
         for r in rows:
             lines.append(f"| {r['id']} | {r['trap_type']} | {r['area_km2']} | {r['gcos']} {self.tag(r['id'] + ' GCoS')} "
                          f"| {', '.join(r['wells_inside']) or 'no'} |")
+        lines += ["", "GCoS is a provisional score from fixed rules, not a calibrated probability of success."]
         return "\n".join(lines)
 
 

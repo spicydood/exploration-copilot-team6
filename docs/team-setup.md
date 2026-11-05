@@ -118,6 +118,10 @@ pip install -r requirements-dev.txt
 cd /data/epic20/APGCE/apgce_team_06/exploration-copilot-team6
 source /data/epic20/APGCE/apgce_team_06/copilot-env/bin/activate
 export COPILOT_STORE_DIR=/data/epic20/APGCE/apgce_team_06/copilot_store
+export COPILOT_DATA_DIR=/data/epic20/APGCE/input_data/challenge1_challenge2
+export MOCK=0
+export LLM=offline
+export CACHE=0
 git pull
 ```
 
@@ -126,22 +130,23 @@ The store folder sits outside the repo, so nothing built from the real data can 
 ### 3. Check the real data and get a starting window
 
 ```bash
+python scripts/check_hpc.py
 python scripts/check_real_data.py
 ```
 
-It lists the volumes, where each well lands, the well results and a provisional reservoir window. Fix any `FAIL` lines before going on.
+The first check estimates full-cube memory; compare it with the team allowance. The second lists volumes, well placement, outcomes and a provisional reservoir window. Fix any `FAIL` lines and have Ruthan review the window before going on. Unknown outcomes remain unknown until confirmed.
 
 ### 4. Build the store and run the app
 
-Use the window that `check_real_data.py` suggests, or Ruthan's window from DUG Insight.
+Use Ruthan's reviewed window from DUG Insight. Replace `START_MS` and `END_MS` below. Precompute refuses an existing output folder: for a new build, set `COPILOT_STORE_DIR` to a fresh folder such as `copilot_store_run2`.
 
 ```bash
-python -m engine.precompute --t0 <start_ms> --t1 <end_ms>
+python -m engine.precompute --t0 START_MS --t1 END_MS
 python -m engine.render_instrument
 uvicorn backend.app:app --host 127.0.0.1 --port 8800
 ```
 
-Open http://localhost:8800 in the remote desktop's Firefox. Use `http`, not `https`. The header should read "real data" and "Gemma 4 connected".
+Open http://localhost:8800 in the remote desktop's Firefox. Use `http`, not `https`. Check `/api/health` reports `mock: false` and `synthetic: false`, and compare the maps and well placement with DUG Insight. Start with the offline reasoner. After those checks, stop the server, run `python scripts/check_hpc.py --check-llm`, set `export LLM=gemma`, and restart it. The header should then read "Gemma 4 connected". Blind evaluation and financial expected values stay disabled pending independent exclusion and calibration.
 
 ### 5. Push from the HPC (only if you changed code there)
 

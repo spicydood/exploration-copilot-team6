@@ -2,10 +2,26 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from functools import cached_property
 from pathlib import Path
 
 import numpy as np
+from engine.outcomes import well_outcome
+
+
+SCORE_NOTE = "Provisional screening score from fixed rules; not a calibrated probability of success."
+
+
+def json_safe(value):
+    """Keep missing numeric measurements null in API JSON, never NaN/Infinity."""
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, (float, np.floating)):
+        return float(value) if np.isfinite(value) else None
+    return value
 
 
 class InvalidLocationError(ValueError):
@@ -19,9 +35,34 @@ class Store:
             raise FileNotFoundError(
                 f"No precomputed store at {self.root}. Run: python -m engine.precompute "
                 "(add MOCK=1 on a laptop).")
-        self.meta = json.loads((self.root / "meta.json").read_text())
-        self.wells = json.loads((self.root / "wells.json").read_text())
-        self.leads = json.loads((self.root / "leads.json").read_text())
+        self.meta = json_safe(json.loads((self.root / "meta.json").read_text(encoding="utf-8")))
+        self.wells = json_safe(json.loads((self.root / "wells.json").read_text(encoding="utf-8")))
+        self.leads = json_safe(json.loads((self.root / "leads.json").read_text(encoding="utf-8")))
+        for well in self.wells:
+            well["result"] = well_outcome(well)
+        # Rebuild outcome-dependent summaries from confirmed labels, including older stores.
+        calibration = {}
+        for outcome in ("discovery", "dry"):
+            selected = [w for w in self.wells if w["result"] == outcome
+                        and w.get("inside_survey", True) and w.get("attributes_at_well")]
+            if not selected:
+                continue
+            values = {}
+            keys = set().union(*(w["attributes_at_well"] for w in selected))
+            for key in keys:
+                measured = [w["attributes_at_well"].get(key) for w in selected]
+                measured = [v for v in measured if isinstance(v, (int, float)) and np.isfinite(v)]
+                if measured:
+                    values[key] = round(float(np.mean(measured)), 3)
+            calibration[outcome] = {**values, "n_wells": len(selected)}
+        self.meta["calibration"] = calibration
+        self.meta["score_basis"] = "heuristic_unvalidated"
+        self.meta["score_note"] = SCORE_NOTE
+        for lead in self.leads:
+            lead["score_basis"] = "heuristic_unvalidated"
+            lead["score_note"] = SCORE_NOTE
+        content = json.dumps([self.meta, self.wells, self.leads], sort_keys=True, allow_nan=False)
+        self.revision = hashlib.sha256(content.encode()).hexdigest()
         self._maps: dict[str, np.ndarray] = {}
 
     # ---------- lookups
