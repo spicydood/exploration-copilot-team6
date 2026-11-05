@@ -122,7 +122,7 @@
     const trail = b.querySelector("details.trail"), summary = trail.querySelector("summary span"), steps = trail.querySelector(".steps");
     const md = b.querySelector(".md"), facts = b.querySelector("[data-facts]"), evRow = facts.querySelector(".ev-row"), doneLine = b.querySelector(".done-line");
     let text = "", pending = false, nSteps = 0, seen = [], active = null, finished = false;
-    const paint = () => { pending = false; const s = nearBottom(); md.innerHTML = renderMd(text, evidence); if (s) scrollDown(); };
+    const paint = () => { pending = false; if (!text && !finished) return; const s = nearBottom(); md.innerHTML = renderMd(text, evidence); if (s) scrollDown(); };
     const markDone = (li) => { if (li.className === "is-error") return; li.className = "is-done"; li.querySelector(".ind").innerHTML = icon("check"); };
     const finishSteps = () => { for (const li of steps.children) markDone(li); active = null; };
     const opts = { audience: EC.S.audience };
@@ -154,6 +154,10 @@
           if (!text) finishSteps();
           text += ev.text;
           if (!pending) { pending = true; requestAnimationFrame(paint); }
+        } else if (ev.type === "reset") {
+          /* The model stopped partway: drop its half answer so the replacement is the only one shown. */
+          text = ""; pending = false;
+          md.innerHTML = `<p class="secondary">${esc(ev.text || "Rewriting the answer")}…</p>`;
         } else if (ev.type === "done") {
           finished = true; paint(); finishSteps();
           trail.removeAttribute("open"); summary.textContent = `How this answer was built · ${plural(nSteps, "step", "steps")}`;

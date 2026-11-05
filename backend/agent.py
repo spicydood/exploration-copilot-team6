@@ -75,7 +75,7 @@ class Agent:
                     yield {"type": "tool", "name": name, "args": args, "why": why,
                            "evidence_ids": ids, "error": out.get("error")}
             except llm.LLMError as e:
-                fallback_reason = f"planner fell back to rules ({e.__class__.__name__})"
+                fallback_reason = "Gemma couldn't plan, so rules chose the measurements"
         if not calls:
             for name, args, why in self._plan_rules(question, selected_lead):
                 out = self.tools.run(name, args)
@@ -96,9 +96,17 @@ class Agent:
                         {"role": "user", "content": self._writer_user(question, evidence, calls)}]):
                     text += tok
                     yield {"type": "token", "text": tok}
-            except llm.LLMError as e:
-                fallback_reason = f"writer fell back to template ({e.__class__.__name__})"
+            except llm.LLMError:
+                fallback_reason = ("Gemma stopped partway, so the offline reasoner answered" if text
+                                   else "Gemma didn't answer, so the offline reasoner did")
                 writer_mode = "offline"
+            if writer_mode == "gemma" and not text.strip():
+                fallback_reason, writer_mode = "Gemma returned an empty answer, so the offline reasoner did", "offline"
+            if writer_mode == "offline" and text:
+                # Tokens already reached the client: tell it to drop them before the offline answer,
+                # so one answer is shown, never half a model answer joined to the template.
+                yield {"type": "reset", "text": "Gemma stopped partway. Writing the answer with the offline reasoner"}
+                text = ""
         if writer_mode == "offline":
             text = self._write_offline(question, selected_lead, evidence, calls)
             for chunk in re.findall(r"\S+\s*", text):
@@ -115,6 +123,8 @@ class Agent:
         for ev in self.stream(question, selected_lead):
             if ev["type"] == "token":
                 out["text"] += ev["text"]
+            elif ev["type"] == "reset":
+                out["text"] = ""
             elif ev["type"] == "tool":
                 out["tools"].append(ev["name"])
             elif ev["type"] == "evidence":

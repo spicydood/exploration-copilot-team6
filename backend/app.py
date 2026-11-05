@@ -127,7 +127,9 @@ def chat(body: ChatIn):
         for ev in agent.stream(message, body.selected_lead):
             events.append(ev)
             yield f"data: {json.dumps(ev, default=str)}\n\n"
-        if CACHE_ON:
+        done = next((e for e in events if e["type"] == "done"), {})
+        # Cache only clean answers: a fallback (no Gemma, a reset, a failed plan) is retried next time.
+        if CACHE_ON and done and not done.get("note"):
             _cache[key] = events
             CACHE_PATH.write_text(json.dumps(_cache, default=str))
 

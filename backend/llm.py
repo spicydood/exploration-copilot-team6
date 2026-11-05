@@ -32,15 +32,20 @@ def stream(messages: list[dict], temperature: float = 0.3, max_tokens: int = 900
                            json={"model": config.LLM_MODEL, "messages": messages, "stream": True,
                                  "temperature": temperature, "max_tokens": max_tokens}) as r:
             r.raise_for_status()
+            finished = False
             for line in r.iter_lines(decode_unicode=True):
                 if not line or not line.startswith("data: "):
                     continue
                 data = line[6:]
                 if data.strip() == "[DONE]":
+                    finished = True
                     break
                 delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
                 if delta:
                     yield delta
+            if not finished:
+                # vLLM always ends with [DONE]; a stream without it was cut off, not completed.
+                raise LLMError("Gemma's stream ended before it finished")
     except Exception as e:
         raise LLMError(str(e)) from e
 

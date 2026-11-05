@@ -208,5 +208,73 @@ class BackendRegressions(unittest.TestCase):
         self.assertNotEqual(key("Rank the leads", "L3"), "L3|rank the leads")
 
 
+    # ---------- Gemma interrupted mid-answer (one answer shown, never half + template)
+    def _gemma_events(self, writer):
+        self.agent.mode = "gemma"
+        with patch.object(llm, "stream", writer):
+            return self.chat("Rank the leads")
+
+    @staticmethod
+    def _shown_text(events):
+        """What the chat bubble holds at the end: tokens after the last reset."""
+        text = ""
+        for event in events:
+            if event["type"] == "reset":
+                text = ""
+            elif event["type"] == "token":
+                text += event["text"]
+        return text
+
+    def test_gemma_dropping_mid_answer_resets_before_the_offline_answer(self):
+        def broken(*args, **kwargs):
+            yield "L2 is the best lead because its sand "
+            raise llm.LLMError("connection dropped")
+        events = self._gemma_events(broken)
+        types = [event["type"] for event in events]
+        self.assertIn("reset", types)
+        self.assertLess(types.index("token"), types.index("reset"))
+        shown = self._shown_text(events)
+        self.assertNotIn("because its sand", shown)
+        self.assertIn("Leads ranked", shown)
+        self.assertEqual(events[-1]["mode"], "offline")
+        self.assertIn("partway", events[-1]["note"])
+
+    def test_gemma_failing_before_any_token_needs_no_reset(self):
+        def down(*args, **kwargs):
+            raise llm.LLMError("refused")
+            yield  # pragma: no cover
+        events = self._gemma_events(down)
+        self.assertNotIn("reset", [event["type"] for event in events])
+        self.assertIn("Leads ranked", self._shown_text(events))
+        self.assertIn("didn't answer", events[-1]["note"])
+
+    def test_gemma_empty_answer_falls_back_to_offline(self):
+        events = self._gemma_events(lambda *args, **kwargs: iter(["  "]))
+        self.assertIn("Leads ranked", self._shown_text(events))
+        self.assertEqual(events[-1]["mode"], "offline")
+
+    def test_eval_answer_text_drops_the_interrupted_part(self):
+        def broken(*args, **kwargs):
+            yield "half a sentence "
+            raise llm.LLMError("timeout")
+        self.agent.mode = "gemma"
+        with patch.object(llm, "stream", broken):
+            result = self.agent.answer("Rank the leads")
+        self.assertNotIn("half a sentence", result["text"])
+
+    def test_fallback_answers_are_not_cached(self):
+        def broken(*args, **kwargs):
+            yield "partial "
+            raise llm.LLMError("timeout")
+        self.agent.mode = "gemma"
+        cache = {}
+        with patch.object(self.api, "store", self.store), patch.object(self.api, "agent", self.agent), \
+                patch.object(self.api, "CACHE_ON", True), patch.object(self.api, "_cache", cache), \
+                patch.object(self.api, "CACHE_PATH", self.store.root / "cache_test.json"), \
+                patch.object(llm, "stream", broken):
+            TestClient(self.api.app).post("/api/chat", json={"message": "Rank the leads"})
+        self.assertEqual(cache, {})
+
+
 if __name__ == "__main__":
     unittest.main()
