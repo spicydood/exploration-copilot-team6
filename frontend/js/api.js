@@ -38,7 +38,11 @@
     if (opts.hideWells?.length) body.hide_wells = opts.hideWells;
     if (opts.audience) body.audience = opts.audience;
     const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: opts.signal });
-    if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(typeof error.detail === "string" ? error.detail : `chat failed: ${res.status}`);
+    }
+    if (!res.body) throw new Error("The server returned no answer stream.");
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     while (true) {
       const { value, done } = await reader.read();

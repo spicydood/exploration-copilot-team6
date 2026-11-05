@@ -62,7 +62,8 @@ def main():
         answers[f"{L}|risks"] = record(agent, f"What could make {L} wrong?", L)
         answers[f"{L}|similar"] = record(agent, f"Find similar traps yet to be tested like {L}", L)
     for w in store.wells:
-        q = f"Why did {w['name']} {'fail' if w.get('result') == 'dry' else 'succeed'}?"
+        q = (f"Why did {w['name']} {'fail' if w['result'] == 'dry' else 'succeed'}?"
+             if w.get("result") in ("dry", "discovery") else f"What is known about {w['name']}?")
         answers[f"well|{w['name']}"] = record(agent, q, None)
     il0, xl0 = store.meta["ilines"][0], store.meta["xlines"][0]
     answers["point"] = record(agent, f"Is there oil at inline {il0 + 20}, crossline {xl0 + 20}?", None)
@@ -86,7 +87,7 @@ def main():
     payload = json.dumps(data, default=float, separators=(",", ":")).replace("</", "<\\/")
     scripts = [fe / "js" / n for n in ("api.js", "map.js", "section.js", "chat.js", "views.js")] + [fe / "app.js"]
     for p in scripts[:-1]:
-        html = html.replace(f'<script src="js/{p.name}"></script>\n', "")
+        html = re.sub(r'<script src="js/' + re.escape(p.name) + r'(?:\?[^"\n]*)?"></script>\s*', "", html)
     html = html.replace('<script src="app.js"></script>',
                         f"<script>window.__STANDALONE__={payload};</script>\n<script>\n"
                         + "\n".join(p.read_text() for p in scripts if p.exists()) + "\n</script>")

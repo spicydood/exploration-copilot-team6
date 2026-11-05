@@ -37,7 +37,8 @@
   const paragraphs = (t) => String(t ?? "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const mode = () => (S.blind || choosing ? "blind" : S.audience === "executive" ? "executive" : "geo");
   const assumed = () => isNum(S.assumptions?.cost) && isNum(S.assumptions?.value);
-  const emv = (d) => (d && isNum(d.gcos) && assumed() ? d.gcos * S.assumptions.value - (1 - d.gcos) * S.assumptions.cost : null);
+  const calibrated = () => S.meta?.score_basis === "calibrated";
+  const emv = (d) => (calibrated() && d && isNum(d.gcos) && assumed() ? d.gcos * S.assumptions.value - (1 - d.gcos) * S.assumptions.cost : null);
   const weakest = (sc) => ELEMENTS.map((e) => e.k).filter((k) => isNum(sc?.[k])).sort((a, b) => sc[a] - sc[b])[0] || null;
   const leadNow = () => { const id = S.sel ?? cur.id; return cur.detail?.lead?.id === id ? cur.detail.lead : S.detail?.lead?.id === id ? S.detail.lead : S.leads.find((d) => d.id === id) || null; };
   const wellOf = (name) => S.wells.find((w) => w.name === name) || null;
@@ -45,7 +46,7 @@
   const hidden = (name) => !!S.blind && S.blind.well === name;
   const wellResult = (name) => (hidden(name) ? "hidden" : wellOf(name)?.result || "unknown");
   const resClass = (name) => ({ discovery: "res-discovery", dry: "res-dry" }[wellResult(name)] || "res-unknown");
-  const answerFor = (id) => { const a = S.lastAnswer || lastAnswer; return a && (!a.lead || !id || a.lead === id) ? a : null; };
+  const answerFor = (id) => { const a = S.lastAnswer || lastAnswer; return a?.lead && (!id || a.lead === id) ? a : null; };
 
   /* Discovery / dry / hidden summary of a lead's wells, e.g. "2 discoveries", "dry · kenari-2", "meranti-1 hidden". */
   function wellsSummary(d) {
@@ -54,10 +55,12 @@
     const disc = names.filter((n) => wellResult(n) === "discovery").length;
     const dry = names.filter((n) => wellResult(n) === "dry");
     const hid = names.filter(hidden);
+    const unknown = names.filter((n) => wellResult(n) === "unknown");
     const parts = [];
     if (disc) parts.push(plural(disc, "discovery", "discoveries"));
     if (dry.length) parts.push(`dry · ${dry.join(", ")}`);
     if (hid.length) parts.push(`${hid.join(", ")} hidden`);
+    if (unknown.length) parts.push(`${unknown.join(", ")} outcome unknown`);
     return parts.join(" · ") || "drilled";
   }
 
@@ -141,7 +144,7 @@
     const simLabel = det.similar_pool === "drilled" ? "Drilled analogs" : "Look-alikes";
     const sim = (det.similar || []).length ? det.similar.map((r) => `<button type="button" class="row-btn" data-lead="${esc(r.id)}" data-sim="${esc(r.similarity)}">${esc(r.id)}</button> <span class="num-sm secondary">${esc(signed(r.similarity))}</span>`).join(" · ") : "none found";
     return `<div class="lead-head"><div><h3>${esc(d.id)} · ${esc(d.name)}</h3><p class="caption">Weakest element: ${esc(wk || "—")} ${num(sc[wk], "", 2)}</p></div><div class="fig"><div class="v">${esc(fmt(d.gcos, 3))}</div><div class="k">GCoS · ${d.drilled ? "drilled" : "undrilled"}</div></div></div>
-      ${scoreRows(d)}
+      <p class="caption">${esc(S.meta?.score_note || "Provisional screening factors; calibration required.")}</p>${scoreRows(d)}
       <dl class="facts">
         <dt>Area</dt><dd>${num(d.area_km2, "km²", 2)} · risked ${num(d.risked_area_km2, "km²", 2)}</dd>
         <dt>Shape</dt><dd>elongation ${num(sh.elongation, "", 2)} · sinuosity ${num(sh.sinuosity, "", 2)}</dd>
@@ -188,25 +191,29 @@
     const set = assumed();
     const leads = [...S.leads].sort((a, b) => (set ? emv(b) - emv(a) : (b.gcos || 0) - (a.gcos || 0)));
     const rows = leads.map((d) => {
-      const e = emv(d), disc = (d.wells_inside || []).filter((n) => wellResult(n) === "discovery").length;
-      const sub = d.drilled ? `Drilled · ${disc ? `${plural(disc, "discovery", "discoveries")} · appraise` : "dry · drop"}` : "Undrilled · candidate";
+      const e = emv(d);
+      const sub = d.drilled ? `Drilled · ${wellsSummary(d)}` : "Undrilled · candidate";
       return `<li><button type="button" class="emv-row" data-lead="${esc(d.id)}" aria-current="${d.id === S.sel}">
         <div><b>${esc(d.id)} · ${esc(d.name)}</b><div class="caption">${esc(sub)}</div></div>
-        <span class="num secondary">${esc(fmt(pct(d.gcos), 0))} %</span>
+        <span class="num secondary">${esc(fmt(d.gcos, 3))}</span>
         <span class="num emv ${e == null ? "faint" : e < 0 ? "bad" : "good"}">${esc(money(e))}</span></button></li>`;
     }).join("");
     // P5: the best undrilled lead as a hero card (CSS shows it on the phone only; desktop D7 keeps the plain list)
     const best = leads.find((d) => !d.drilled);
     const hero = best ? `<div class="exec-hero card card-tint"><p class="label secondary">Best undrilled bet</p><h3>${esc(best.id)} · ${esc(best.name)}</h3>
         <p class="num" style="font-size:1.75rem;line-height:1">${esc(money(emv(best)))}</p>
-        <p class="caption">${esc(isNum(best.gcos) && best.gcos > 0 ? `about 1 in ${Math.round(1 / best.gcos)} odds` : "odds unknown")}${set ? ` · ${esc(money(S.assumptions.cost))} at risk · worth ${esc(money(S.assumptions.value))} if it works` : " · enter cost and value in the Business case panel"}</p></div>` : "";
-    return `<div class="ev-head"><h3>Leads by expected value</h3><p class="caption num-sm">odds · EMV</p></div>${hero}<ol class="emv-list">${rows}</ol>
-      <p class="caption">${set ? "EMV from your figures · dry-hole cost and value in the Business case panel" : "Enter dry-hole cost and value in the Business case panel to see EMV"}</p>`;
+        <p class="caption">Provisional screening score ${esc(fmt(best.gcos, 3))} · calibration required before estimating odds or financial value</p></div>` : "";
+    return `<div class="ev-head"><h3>Leads by screening score</h3><p class="caption num-sm">provisional</p></div>${hero}<ol class="emv-list">${rows}</ol>
+      <p class="caption">${calibrated() ? "EMV from your figures" : "Financial estimates require a calibrated probability of success."}</p>`;
   }
 
   function renderBusiness(el) {
     EC.bottom?.head?.("Business case", "economics from your figures");
     bizEl = el;
+    if (!calibrated()) {
+      el.innerHTML = `<div class="card"><h3>Calibration required</h3><p>The screening scores are provisional factors, not probabilities. Expert-reviewed calibration is required before calculating expected financial values.</p></div>`;
+      return;
+    }
     const a = S.assumptions || {};
     el.innerHTML = `<div class="view-business">
       <div class="assumptions">
@@ -316,6 +323,10 @@
 
   const blind = {
     start(well) {
+      if (S.health?.hide_wells !== true) {
+        EC.chat?.banner("warning", "Blind evaluation is unavailable", "The backend cannot yet exclude all hidden-well evidence. This feature is disabled until that exclusion is verified.");
+        return;
+      }
       if (!well || !wellOf(well)) { choosing = true; setPressed(true); renderTabs(); renderBody(); return; }
       choosing = false;
       S.blind = { well, step: "hide", prediction: null };
@@ -382,8 +393,8 @@
           <p class="memo-rec">${esc(rec || "Ask the copilot to explain this lead first; the recommendation comes from its cited answer.")}</p>
           <span class="trap t-${esc(d.trap_type)}">${esc(d.trap_type || "Unclassified")}${d.subtype ? ` <span class="caption">· ${esc(d.subtype)}</span>` : ""}</span></div>
         <div class="stats">
-          <div class="stat"><span class="label secondary">Chance of success</span><div class="fig">${odds ? `${pct(odds)} %` : "—"}</div><p class="caption">GCoS ${num(d.gcos, "", 3)}${odds ? ` · about 1 in ${Math.round(1 / odds)}` : ""}</p></div>
-          <div class="stat"><span class="label secondary">Expected value</span><div class="fig${e == null ? "" : e < 0 ? " bad" : " good"}">${esc(money(e))}</div><p class="caption">${set ? "from your figures" : "enter figures in Executive mode"}</p></div>
+          <div class="stat"><span class="label secondary">Provisional score</span><div class="fig">${esc(fmt(d.gcos, 3))}</div><p class="caption">Not a calibrated probability</p></div>
+          <div class="stat"><span class="label secondary">Expected value</span><div class="fig${e == null ? "" : e < 0 ? " bad" : " good"}">${esc(money(e))}</div><p class="caption">${calibrated() ? "from your figures" : "calibration required"}</p></div>
           <div class="stat"><span class="label secondary">Area</span><div class="fig">${esc(fmt(d.area_km2, 2))} km²</div><p class="caption">risked ${num(d.risked_area_km2, "km²", 2)}</p></div>
           <div class="stat"><span class="label secondary">The one risk</span><div class="fig">${esc(cap(wk || "—"))}</div><p class="caption">P ${num(sc[wk], "", 2)}</p></div>
         </div>

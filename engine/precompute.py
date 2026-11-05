@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -100,13 +99,33 @@ def run(vols: dict[str, io.Volume], data_dir: Path, out: Path, t0: float, t1: fl
         params: L.Params, results_csv: Path | None, synthetic: bool,
         horizon: Path | None = None) -> dict:
     t = time.time()
+    out = Path(out).resolve()
+    source = Path(data_dir).resolve()
+    if out == source or out in source.parents or source in out.parents:
+        raise ValueError("The output store must be separate from the input data directory.")
     if out.exists():
-        shutil.rmtree(out)
-    (out / "maps").mkdir(parents=True)
-    (out / "cubes").mkdir()
+        raise FileExistsError(f"Output store already exists: {out}. Choose a new --out directory; existing stores are never deleted.")
+    if not np.isfinite(t0) or not np.isfinite(t1) or t0 >= t1:
+        raise ValueError("The reservoir window must have finite start and end times with start < end.")
+    ref = vols["sand_prob"]
+    for name, volume in vols.items():
+        if volume.data.shape != ref.data.shape or not all(np.array_equal(getattr(volume, axis), getattr(ref, axis))
+                                                         for axis in ("ilines", "xlines", "times")):
+            raise ValueError(f"Volume {name} does not share the reference grid and samples. Align inputs before processing.")
+        if not (np.allclose(volume.cdp_x, ref.cdp_x, rtol=0, atol=0.001, equal_nan=True) and
+                np.allclose(volume.cdp_y, ref.cdp_y, rtol=0, atol=0.001, equal_nan=True)):
+            raise ValueError(f"Volume {name} has different map coordinates. Verify coordinate units and alignment.")
+    if t0 < ref.times[0] or t1 > ref.times[-1]:
+        raise ValueError("The requested reservoir window extends outside the available samples.")
+    window = ref.window_index(t0, t1)
+    if window.start >= window.stop:
+        raise ValueError("The requested window contains no samples.")
 
     ref = vols["sand_prob"]
-    maps = build_maps(vols, t0, t1, None)
+    maps = build_maps(vols, t0, t1, params.sand_threshold)
+    valid_sand = maps["sand"][np.isfinite(maps["sand"])]
+    if not len(valid_sand) or valid_sand.min() < 0 or valid_sand.max() > 1:
+        raise ValueError("Sand probability must contain finite values on a 0 to 1 scale; verify null values and units.")
     if horizon:
         maps["top_time"] = horizon_to_grid(horizon, ref)
     params.bin_area_m2 = bin_area(ref)
@@ -114,6 +133,8 @@ def run(vols: dict[str, io.Volume], data_dir: Path, out: Path, t0: float, t1: fl
     calib = W.calibrate(wells, maps)
     found = L.detect(maps, wells, params)
 
+    (out / "maps").mkdir(parents=True)
+    (out / "cubes").mkdir()
     meta_maps = {}
     for k, a in maps.items():
         np.save(out / "maps" / f"{k}.npy", a.astype(np.float32))
@@ -139,7 +160,7 @@ def run(vols: dict[str, io.Volume], data_dir: Path, out: Path, t0: float, t1: fl
         "xlines": [int(ref.xlines[0]), int(ref.xlines[-1])],
         "il_values": [int(x) for x in ref.ilines], "xl_values": [int(x) for x in ref.xlines],
         "bin_area_m2": round(params.bin_area_m2, 1),
-        "sand_threshold": round(params.sand_threshold or L.sand_threshold(maps["sand"]), 3),
+        "sand_threshold": round(params.sand_threshold if params.sand_threshold is not None else L.sand_threshold(maps["sand"]), 3),
         "maps": meta_maps, "n_leads": len(found), "n_wells": len(wells),
         "calibration": calib,
     }
@@ -168,7 +189,8 @@ def main(argv=None):
         from engine import mock_data
         vols, _ = mock_data.build()
         data_dir = mock_data.write_well_files(config.ROOT / "store_mock_input")
-        t0, t1 = a.t0 or 1930.0, a.t1 or 2080.0
+        t0 = a.t0 if a.t0 is not None else 1930.0
+        t1 = a.t1 if a.t1 is not None else 2080.0
         return run(vols, data_dir, Path(a.out), t0, t1, params, None, synthetic=True)
 
     if a.t0 is None or a.t1 is None:

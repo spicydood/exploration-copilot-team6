@@ -6,7 +6,7 @@ Build one complete workflow: a user selects a real prospect, asks about it, and 
 
 Edwin owns reading the data and producing checked measurements. Atif owns the server, the AI workflow, and reliable answers. Both work against the same saved data format so Atif can continue with synthetic data while Edwin works on the HPC.
 
-The first synthetic-data fixes now cover citations across answers, ranking after lead selection, and exact location checks. The wider tasks below still include real-data integration, evidence validation, model reliability, and the blind test.
+Synthetic-data fixes now cover citations, ranking, exact locations, unknown outcomes, interrupted model responses, mechanical evidence checks, and versioned atomic caching. Processing rejects mismatched inputs and existing output stores. Real-data integration and expert review remain the shared milestones. Independent blind evaluation is disabled until exclusion of all held-out evidence is implemented.
 
 ## How the backend works
 
@@ -30,12 +30,12 @@ The review identified these issues to carry into implementation:
 
 | Issue | Consequence | Task | Status |
 |---|---|---|---|
-| `hide_wells` is accepted but not applied | The blind test can expose the hidden outcome to the assistant | A06 with Edwin | Pending |
+| Independent blind evaluation is unfinished | The hidden outcome must be excluded from every derived source | A06 with Edwin | UI and API disabled; independent exclusion pending |
 | Evidence IDs restart at E1 and the frontend uses one shared lookup | An earlier answer's citation can open a later answer's evidence | A02 | Answer-specific evidence implemented; wider evidence validation pending |
 | Offline planning handles a selected lead before a ranking request | Asking to rank leads can return only the selected lead's explanation | A03 | Fixed and tested with synthetic data; conversation context pending |
 | Coordinate lookups silently clamp to the survey edge | A nonexistent location can receive a real value under the wrong coordinates | E02 and A01 | Exact lookup and error handling tested with synthetic data; real-data alignment pending |
-| A partially streamed model answer is followed by the fallback answer | Users can see two explanations joined together | A04 | Pending |
-| Risk scores use fixed formulas | Displayed probabilities need an explicit assumption basis and expert review | E04 | Pending |
+| A partially streamed model answer is followed by the fallback answer | Users can see two explanations joined together | A04 | Drafts are buffered and checked before display; interrupted responses fall back once |
+| Risk scores use fixed formulas | Displayed probabilities need an explicit assumption basis and expert review | E04 | Provisional labels and financial-value guard implemented; expert calibration pending |
 
 ## First shared milestone
 

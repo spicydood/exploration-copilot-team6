@@ -229,7 +229,9 @@
     const a = analogs[s.id] || null;
     const wr = s.well_results || {}; const disc = Object.values(wr).filter((x) => x === "discovery").length;
     const wells = (s.wells_inside || []).length;
-    const tag = disc ? plural(disc, "discovery", "discoveries") : wells ? plural(wells, "dry well", "dry wells") : "undrilled";
+    const dry = Object.values(wr).filter((x) => x === "dry").length;
+    const unknown = Math.max(0, wells - disc - dry);
+    const tag = wells ? [disc ? plural(disc, "discovery", "discoveries") : "", dry ? plural(dry, "dry well", "dry wells") : "", unknown ? `${unknown} outcome unknown` : ""].filter(Boolean).join(" · ") : "undrilled";
     head(`${esc(t.id)} vs drilled analog ${esc(s.id)}`, `standardised features · cosine similarity <span class="num-sm">${esc(fmt(s.similarity, 3))}</span>`);
     const match = s.matching_features || [];
     box.innerHTML = `<div class="table-wrap compare-wrap"><table class="compare-table"><thead><tr><th scope="col">Feature</th><th scope="col">${esc(t.id)} · ${t.drilled ? "drilled" : "undrilled"}</th><th scope="col">${esc(s.id)} · ${esc(tag)}</th><th scope="col">Verdict</th></tr></thead><tbody>${

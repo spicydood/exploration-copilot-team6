@@ -9,25 +9,13 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from . import io
+from .outcomes import classify_result
 
 GR_KEYS = ("GR",)
 RES_KEYS = ("RES", "RT", "ILD", "LLD", "RD", "AT90", "RDEP")
 DEN_KEYS = ("RHOB", "DEN", "RHOZ")
 NEU_KEYS = ("NPHI", "NEU", "TNPH")
 SON_KEYS = ("DTC", "DT", "SON")
-POSITIVE = ("disc", "gas", "oil", "hydrocarbon", "hc", "pay", "success")
-NEGATIVE = ("dry", "water", "wet", "shows", "fail", "p&a")
-
-
-def classify_result(text: str | None) -> str:
-    t = (text or "").lower()
-    if any(k in t for k in NEGATIVE):
-        return "dry"
-    if any(k in t for k in POSITIVE):
-        return "discovery"
-    return "unknown"
-
-
 def _curve(df, keys):
     for k in keys:
         for c in df.columns:

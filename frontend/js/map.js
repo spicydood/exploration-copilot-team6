@@ -155,12 +155,14 @@
       // keep the label inside the stage and below the title/tab band (88 px), so it never covers the chrome
       const x = Math.min(Math.max(x0, 96), g.W - 96), y = Math.min(Math.max(y0, 92), g.H - 104);
       let row2;
-      if (exec) {
+      if (exec && S().meta?.score_basis === "calibrated") {
         row2 = `<span class="num-sm faint">odds</span><span class="num-sm acc">${esc(Math.round(d.gcos * 100))} %</span>`;
         if (typeof cost === "number" && typeof value === "number") {
           const emv = d.gcos * value - (1 - d.gcos) * cost;
           row2 = `<span class="num-sm faint">EMV</span><span class="num-sm ${emv < 0 ? "res-dry" : "res-discovery"}">${esc(money(emv))}</span>` + row2;
         }
+      } else if (exec) {
+        row2 = `<span class="num-sm faint">score</span><span class="num-sm acc">${esc(fmt(d.gcos, 3))}</span>`;
       } else {
         row2 = `<span class="num-sm faint">GCoS</span><span class="num-sm acc">${esc(fmt(d.gcos, 3))}</span><span class="num-sm">${esc(fmt(d.area_km2, 2))} km²</span>`;
       }
@@ -420,9 +422,9 @@
     EC.bus.on("well", () => draw());
     EC.bus.on("blind", () => { draw(); locator(); });
     EC.bus.on("audience", (aud) => {
-      // D7: in Executive mode the map is a value view; the attribute tabs go and the subtitle says what the labels show
+      // Executive labels use provisional scores until calibrated probabilities are available.
       if (els.bar) els.bar.hidden = aud === "executive";
-      if (els.sub) els.sub.textContent = aud === "executive" ? "value view · labels show odds and expected value" : st.sub;
+      if (els.sub) els.sub.textContent = aud === "executive" ? (S().meta?.score_basis === "calibrated" ? "value view · labels show odds and expected value" : "provisional screening scores · calibration required") : st.sub;
       draw();
     });
     EC.bus.on("evidence", onEvidence);

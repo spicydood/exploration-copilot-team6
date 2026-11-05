@@ -32,20 +32,26 @@ def stream(messages: list[dict], temperature: float = 0.3, max_tokens: int = 900
                            json={"model": config.LLM_MODEL, "messages": messages, "stream": True,
                                  "temperature": temperature, "max_tokens": max_tokens}) as r:
             r.raise_for_status()
-            finished = False
+            complete = False
             for line in r.iter_lines(decode_unicode=True):
                 if not line or not line.startswith("data: "):
                     continue
                 data = line[6:]
                 if data.strip() == "[DONE]":
-                    finished = True
+                    complete = True
                     break
-                delta = json.loads(data)["choices"][0].get("delta", {}).get("content")
+                choices = json.loads(data).get("choices", [])
+                if not choices:  # optional usage-only chunk
+                    continue
+                if choices[0].get("finish_reason") in ("length", "content_filter"):
+                    raise LLMError("The model did not finish its answer.")
+                delta = choices[0].get("delta", {}).get("content")
                 if delta:
+                    if not isinstance(delta, str):
+                        raise LLMError("The model returned invalid text content.")
                     yield delta
-            if not finished:
-                # vLLM always ends with [DONE]; a stream without it was cut off, not completed.
-                raise LLMError("Gemma's stream ended before it finished")
+            if not complete:
+                raise LLMError("The model stream ended before its completion marker.")
     except Exception as e:
         raise LLMError(str(e)) from e
 
@@ -59,18 +65,13 @@ def reachable() -> bool:
 
 def parse_json(text: str) -> dict | None:
     """Pull the first {...} object out of a model reply (tolerates code fences)."""
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        for k in range(start, len(text)):
-            if text[k] == "{":
-                depth += 1
-            elif text[k] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start:k + 1])
-                    except json.JSONDecodeError:
-                        break
-        start = text.find("{", start + 1)
+    for start, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            value, _ = json.JSONDecoder().raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
     return None

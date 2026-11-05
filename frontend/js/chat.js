@@ -168,9 +168,9 @@
           if (bad.length) doneLine.insertAdjacentHTML("beforebegin",
             `<div class="unverified" role="status">${icon("triangle-alert")}<div><b>${esc(plural(bad.length, "number isn’t", "numbers aren’t"))} in the evidence: ${esc(bad.join(", "))}</b><br>Check them before using this answer.</div></div>`);
           doneLine.innerHTML = `<span>${esc(cited.length)} of ${esc(plural(seen.length, "evidence item", "evidence items"))} cited</span>` +
-            `<span>${ev.mode === "gemma" ? "Gemma 4" : "Offline reasoner"}</span><span>${num(ev.seconds, "s", 1)}</span>${ev.note ? `<span>${esc(ev.note)}</span>` : ""}`;
+            `<span>${ev.mode === "gemma" ? "Gemma 4" : "Offline reasoner"}${ev.cached ? " · recorded answer" : ""}</span><span>${num(ev.seconds, "s", 1)}</span>${ev.note ? `<span>${esc(ev.note)}</span>` : ""}`;
           announce(`Answer ready. ${plural(cited.length, "evidence item", "evidence items")} cited` + (bad.length ? `, ${plural(bad.length, "number", "numbers")} not in the evidence.` : "."));
-          EC.S.lastAnswer = { text, cited, lead: selectedLead, evidence: { ...evidence } };
+          EC.S.lastAnswer = { text, cited, lead: ev.lead === undefined ? selectedLead : ev.lead, evidence: { ...evidence } };
           EC.bus.emit("answer", EC.S.lastAnswer);
           if (nearBottom()) scrollDown();
         }
@@ -265,7 +265,10 @@
     const S = EC.S;
     const dry = S.wells.find((w) => w.result === "dry" && S.leads.some((d) => (d.wells_inside || []).includes(w.name)));
     const qs = [];
-    if (well) qs.push(`Why did ${well} ${S.wells.find((w) => w.name === well)?.result === "dry" ? "come up dry" : "succeed"}?`);
+    if (well) {
+      const result = S.wells.find((w) => w.name === well)?.result;
+      qs.push(result === "dry" ? `Why did ${well} come up dry?` : result === "discovery" ? `Why did ${well} succeed?` : `What is known about ${well}?`);
+    }
     qs.push(lead ? "What is the geological opportunity here, and why?" : "What is the geological opportunity, and why?");
     if (lead) qs.push(`What could make ${lead} wrong?`);
     qs.push("Find similar traps yet to be tested");

@@ -4,7 +4,8 @@ APGCE GeoHackathon 2026 · Challenge 1 · *Can an AI agent reason like an explor
 
 Exploration Copilot integrates seismic stacks, inversion volumes and wells to find leads, classify
 the trap (structural, stratigraphic, combination), score the petroleum system, and explain the
-opportunity in plain language. **Every number it states is cited to a measured fact.**
+opportunity in plain language. Answers link to evidence; model drafts are checked for
+citation and numerical consistency before display.
 
 ```
 engine/      reads SEG-Y + LAS, builds attribute maps, finds and scores leads (precompute, run once)
@@ -21,34 +22,57 @@ Step-by-step setup for laptops and the HPC, including how to push from the HPC: 
 
 ```bash
 pip install -r requirements.txt
-MOCK=1 python -m engine.precompute          # builds store_mock/ from a fake survey
+MOCK=1 python -m engine.precompute          # first run: builds store_mock/ from a fake survey
 MOCK=1 uvicorn backend.app:app --port 8800  # open http://localhost:8800
 ```
 
 Everyone can build UI, prompts and tools this way before touching the HPC.
+Existing stores are never deleted by precompute. To rebuild, choose a new `--out` path and set
+`COPILOT_STORE_DIR` to that path before starting the server.
 
 ## Run it on the DUG HPC (real data)
 
 ```bash
-# 1. once: environment
-python3 -m venv ~/copilot-env && source ~/copilot-env/bin/activate
-pip install --upgrade pip && pip install -r requirements.txt
-export COPILOT_STORE_DIR=/data/epic20/APGCE/<your_team>/copilot_store
+# Run from the cloned repo inside your team's HPC storage folder.
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+export MOCK=0
+export LLM=offline
+export CACHE=0
+export COPILOT_DATA_DIR=/data/epic20/APGCE/input_data/challenge1_challenge2
+export COPILOT_STORE_DIR="$PWD/../copilot_store_real_run1"
 
-# 2. check the data and get a provisional reservoir window (reads headers + a sample of traces)
+# Read headers and estimate cube memory without loading trace amplitudes.
+python scripts/check_hpc.py
+# Sample sand traces and inspect well placement/outcomes for Ruthan's review.
 python scripts/check_real_data.py
 
-# 3. run the engine with that window, or with Ruthan's window from DUG Insight:
-python -m engine.precompute --t0 <start_ms> --t1 <end_ms>
+# Replace START_MS and END_MS with Ruthan's reviewed interval.
+python -m engine.precompute --t0 START_MS --t1 END_MS
+python -m engine.render_instrument
 #    optional: --horizon top_reservoir.txt   (X Y TIME export from DUG Insight)
 #    optional: --sand-threshold 0.6          (calibrated at the wells)
 
-# 4. serve on the login node and open http://localhost:8800 in Firefox on the remote desktop
-uvicorn backend.app:app --host 127.0.0.1 --port 8800
+# Open http://localhost:8800 in Firefox INSIDE the remote desktop.
+python -m uvicorn backend.app:app --host 127.0.0.1 --port 8800
 ```
+
+Keep that output path for server restarts. For another build, use a new folder such as
+`copilot_store_real_run2`; processing refuses to replace existing outputs. The reader currently
+loads all nine full volumes, so compare the memory estimate with your team allocation first.
+
+After Ruthan checks the real-data maps and wells, stop the server with Ctrl+C, run
+`python scripts/check_hpc.py --check-llm`, set `export LLM=gemma`, and restart the server.
+The Gemma answer is buffered until completion and mechanical evidence checks pass; progress
+and tool events still stream. Interrupted or rejected drafts are replaced by one labelled
+offline answer, and are not cached as successful model answers.
 
 Well results: if `WellList_Information.xlsx` has no result column, copy
 `data/well_results.example.csv` to `data/well_results.csv`, fill it in (Ruthan), and rerun precompute.
+Use explicit `discovery`, `dry`, or `unknown` labels. Ambiguous notes such as `P&A`, `gas shows`,
+or `no gas` stay unknown until reviewed. Older stores are normalised on load and their
+outcome-dependent calibration summaries are rebuilt from confirmed labels.
 
 **First run on real data: check these outputs before trusting anything**
 
@@ -56,8 +80,14 @@ Well results: if `WellList_Information.xlsx` has no result column, copy
    inline/crossline header bytes may differ: set `COPILOT_ILINE_BYTE` / `COPILOT_XLINE_BYTE`.
 2. `store/wells.json`: every well has `i`, `j` and `inside_survey: true`. If not, the
    coordinate columns in the deviation or well-list files were not recognised (see `engine/wells.py`).
-3. Open the app: wells sit where DUG Insight shows them, and discoveries land on sand.
-4. `meta.json -> calibration`: discovery wells should differ from dry wells on Vp/Vs and sand.
+3. Open the app: compare well placement and interpreted reservoir features with DUG Insight.
+4. Review the known-outcome comparisons without assuming that discoveries and dry wells must separate.
+5. `/api/health` reports `mock: false` and `synthetic: false` for real-data work.
+
+Scores remain provisional screening factors. Financial expected values are disabled until
+calibrated probabilities are available. The blind well test is disabled in the UI and API
+because independent exclusion of all held-out evidence is not implemented. Evidence checks
+verify references and numerical consistency; they do not establish geological correctness.
 
 ## Front end
 
@@ -90,8 +120,7 @@ MOCK=1 python -m engine.render_instrument         # volume + risk-stack renders 
 
 Demo states for screenshots and the walkthrough: `?lead=L3`, `?state=offline`, `?state=unreachable`,
 `?state=refusal`, `?state=empty`, `?state=executive`, `?state=blind`, `?state=memo`, `?state=imagefail`.
-The Executive mode's dollar figures come only from the two assumption inputs (dry-hole cost, value if it
-works); nothing is shown until the asset team enters them.
+The Executive mode disables financial expected values while scores remain uncalibrated.
 
 ## LLM settings
 
